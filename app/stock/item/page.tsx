@@ -1,15 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useMemo } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -21,73 +16,75 @@ import {
 import {
   Package,
   Plus,
-  Search,
-  Filter,
-  Download,
   RefreshCw,
   Eye,
   Edit,
   Trash2,
-  MoreHorizontal,
+  Download,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useRouter } from "next/navigation";
-import { useItems } from "@/lib/hooks/data/useItems";
-import { useDeleteItem } from "@/lib/hooks/mutations/useDeleteItem";
-import LayoutClient from "@/components/Layout/LayoutClient";
+import { useItemsQuery, useDeleteItemMutation } from "@/hooks/data/useItemsQuery";
+import { useItemOptionsQuery } from "@/hooks/data/useItemsQuery";
+import { FilterDropdown } from "@/components/ui/filter-dropdown";
+import { SearchBar } from "@/components/ui/search-bar";
+import { toast } from "sonner";
+import { Item } from "@/types/item";
+
+interface Filters {
+  name: string;
+  group: string;
+  status: string;
+  id: string;
+}
 
 export default function ItemPage() {
   const router = useRouter();
+  const [filters, setFilters] = useState<Filters>({
+    name: "",
+    group: "all",
+    status: "all",
+    id: "",
+  });
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterGroup, setFilterGroup] = useState("all");
-  const [filterStatus, setFilterStatus] = useState("all");
-  
-  const { items, isLoading, error, refetch } = useItems();
-  const deleteItemMutation = useDeleteItem();
 
-  const itemGroups = [...new Set(items.map((item) => item.item_group).filter(Boolean))];
+  // Fetch items with filters
+  const { data: itemsData, isLoading, error, refetch } = useItemsQuery(filters);
+  const { data: optionsData } = useItemOptionsQuery();
+  const deleteMutation = useDeleteItemMutation();
 
-  const filteredItems = items.filter(
-    (item) =>
-      (filterGroup === "all" || item.item_group === filterGroup) &&
-      (filterStatus === "all" ||
-        (filterStatus === "Enabled" && !item.disabled) ||
-        (filterStatus === "Disabled" && item.disabled)) &&
-      (searchQuery === "" ||
-        item.item_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.item_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.brand && item.brand.toLowerCase().includes(searchQuery.toLowerCase())))
-  );
+  const items = itemsData?.data?.items || [];
+  const itemGroups = optionsData?.data?.item_groups || [];
 
-  const handleDelete = (name: string, itemName: string) => {
-    if (confirm(`Are you sure you want to delete "${itemName}"?`)) {
-      deleteItemMutation.mutate(name);
+  // Filter items based on search query
+  const filteredItems = useMemo(() => {
+    if (!searchQuery) return items;
+    
+    const query = searchQuery.toLowerCase();
+    return items.filter(
+      (item) =>
+        item.item_name.toLowerCase().includes(query) ||
+        item.item_code.toLowerCase().includes(query) ||
+        (item.brand && item.brand.toLowerCase().includes(query))
+    );
+  }, [items, searchQuery]);
+
+  const handleFilterChange = (newFilters: Filters) => {
+    setFilters(newFilters);
+  };
+
+  const handleRefresh = () => {
+    refetch();
+  };
+
+  const handleDelete = async (item: Item) => {
+    if (window.confirm(`Are you sure you want to delete "${item.item_name}"?`)) {
+      deleteMutation.mutate(item.name);
     }
   };
 
   const handleExport = () => {
-    // CSV export functionality
-    const csvContent = [
-      ["Item Code", "Item Name", "Item Group", "UOM", "Status"].join(","),
-      ...filteredItems.map(item =>
-        [
-          item.item_code,
-          item.item_name,
-          item.item_group,
-          item.stock_uom,
-          item.disabled ? "Disabled" : "Enabled"
-        ].join(",")
-      )
-    ].join("\n");
-
-    const blob = new Blob([csvContent], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "items.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    // TODO: Implement CSV export
+    toast.info("Export feature coming soon!");
   };
 
   const getStatusColor = (disabled?: number) => {
@@ -98,206 +95,191 @@ export default function ItemPage() {
     return disabled ? "Disabled" : "Enabled";
   };
 
-  return (
-    <LayoutClient>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold flex items-center">
-              <Package className="w-8 h-8 mr-3 text-primary" />
-              Items
-            </h1>
-            <p className="text-muted-foreground">
-              Manage inventory items and stock
-            </p>
-          </div>
-          <div className="flex space-x-2">
-            <Button
-              onClick={() => refetch()}
-              variant="outline"
-              size="sm"
-              disabled={isLoading}
-            >
-              <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button onClick={handleExport} variant="outline" size="sm">
-              <Download className="w-4 h-4 mr-2" />
-              Export
-            </Button>
-            <Button onClick={() => router.push("/stock/item/new")}>
-              <Plus className="w-4 h-4 mr-2" />
-              New Item
-            </Button>
-          </div>
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background p-8">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-2">Error loading items</h2>
+          <p className="text-muted-foreground mb-4">
+            {error.message || "Something went wrong"}
+          </p>
+          <Button onClick={handleRefresh}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Try Again
+          </Button>
         </div>
-
-        {/* Search and Filters */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
-                <Input
-                  placeholder="Search items..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="w-full sm:w-auto">
-                    <Filter className="w-4 h-4 mr-2" />
-                    Filter: {filterGroup === "all" ? "All Groups" : filterGroup}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setFilterGroup("all")}>
-                    All Groups
-                  </DropdownMenuItem>
-                  {itemGroups.map((group) => (
-                    <DropdownMenuItem key={group} onClick={() => setFilterGroup(group)}>
-                      {group}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="w-full sm:w-auto">
-                    <Filter className="w-4 h-4 mr-2" />
-                    Status: {filterStatus}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem onClick={() => setFilterStatus("all")}>
-                    All Status
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setFilterStatus("Enabled")}>
-                    Enabled
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setFilterStatus("Disabled")}>
-                    Disabled
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Items Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Inventory Items</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="space-y-3">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="flex items-center space-x-4">
-                    <Skeleton className="h-12 w-12 rounded-full" />
-                    <div className="space-y-2 flex-1">
-                      <Skeleton className="h-4 w-full" />
-                      <Skeleton className="h-4 w-3/4" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : error ? (
-              <div className="text-center py-8">
-                <p className="text-red-500">Failed to load items: {error.message}</p>
-                <Button onClick={() => refetch()} className="mt-2">
-                  Try Again
-                </Button>
-              </div>
-            ) : (
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item Code</TableHead>
-                      <TableHead>Item Name</TableHead>
-                      <TableHead>Item Group</TableHead>
-                      <TableHead>UOM</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredItems.map((item) => (
-                      <TableRow key={item.name}>
-                        <TableCell className="font-mono text-sm">
-                          {item.item_code}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {item.item_name}
-                        </TableCell>
-                        <TableCell>{item.item_group}</TableCell>
-                        <TableCell>{item.stock_uom}</TableCell>
-                        <TableCell>
-                          <Badge className={getStatusColor(item.disabled)}>
-                            {getStatusText(item.disabled)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  router.push(`/stock/item/${encodeURIComponent(item.item_code)}`)
-                                }
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                View
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  router.push(`/stock/item/${encodeURIComponent(item.item_code)}/edit`)
-                                }
-                              >
-                                <Edit className="h-4 w-4 mr-2" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleDelete(item.name, item.item_name)}
-                                className="text-red-600"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-
-            {filteredItems.length === 0 && !isLoading && (
-              <div className="text-center py-8 text-muted-foreground">
-                <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No items found</p>
-                <Button
-                  className="mt-4"
-                  onClick={() => router.push("/stock/item/new")}
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add New Item
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
       </div>
-    </LayoutClient>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background p-8">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center">
+            <Package className="w-8 h-8 mr-3 text-primary" />
+            Items
+          </h1>
+          <p className="text-muted-foreground">
+            Manage inventory items and stock
+          </p>
+        </div>
+        <div className="flex space-x-2">
+          <Button
+            onClick={handleRefresh}
+            variant="outline"
+            disabled={isLoading}
+            className="flex items-center"
+          >
+            <RefreshCw
+              className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+          <Button onClick={handleExport} variant="outline">
+            <Download className="w-4 h-4 mr-2" />
+            Export
+          </Button>
+          <Button onClick={() => router.push("/stock/item/new")}>
+            <Plus className="w-4 h-4 mr-2" />
+            New Item
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters and Search */}
+      <div className="flex items-center gap-4 mb-6">
+        <FilterDropdown
+          filters={filters}
+          onFiltersChange={handleFilterChange}
+          itemGroups={itemGroups}
+          onApply={() => refetch()}
+          onClear={() => {
+            setFilters({
+              name: "",
+              group: "all",
+              status: "all",
+              id: "",
+            });
+          }}
+        />
+        <SearchBar
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder="Search items..."
+        />
+      </div>
+
+      {/* Items Table */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Inventory Items</CardTitle>
+              <CardDescription>
+                {filteredItems.length} item{filteredItems.length !== 1 ? "s" : ""} found
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item Code</TableHead>
+                    <TableHead>Item Name</TableHead>
+                    <TableHead>Item Group</TableHead>
+                    <TableHead>UOM</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredItems.map((item) => (
+                    <TableRow
+                      key={item.name}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => {
+                        const encodedCode = encodeURIComponent(item.item_code);
+                        router.push(`/stock/item/${encodedCode}`);
+                      }}
+                    >
+                      <TableCell className="font-mono text-sm">
+                        {item.item_code}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {item.item_name}
+                      </TableCell>
+                      <TableCell>{item.item_group}</TableCell>
+                      <TableCell>{item.stock_uom}</TableCell>
+                      <TableCell>
+                        <Badge className={getStatusColor(item.disabled)}>
+                          {getStatusText(item.disabled)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <div className="flex justify-end space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const encodedCode = encodeURIComponent(item.item_code);
+                              router.push(`/stock/item/${encodedCode}`);
+                            }}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const encodedCode = encodeURIComponent(item.item_code);
+                              router.push(`/stock/item/${encodedCode}/edit`);
+                            }}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(item)}
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {filteredItems.length === 0 && !isLoading && (
+            <div className="text-center py-8 text-muted-foreground">
+              <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p>No items found</p>
+              <Button
+                className="mt-4"
+                onClick={() => router.push("/stock/item/new")}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add New Item
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
