@@ -5,25 +5,22 @@ import LayoutComponent from "@/components/Layout";
 import "@/styles/globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 
-const inter = Inter({ subsets: ["latin"],  variable: "--font-inter" });
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "VersaForge ERP",
-  description: "Custom ERP System by Versalabs",
+  title: "Pana ERP",
+  description: "Custom ERP System for Pana Promotions",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en" className={inter.className}>
       <body className="m-0 p-0 bg-[#0f0f0f] overflow-auto min-h-screen">
-        <div
-          className="origin-top-left"
-          // style={{
-          //   transform: "scale(0.9)",
-          //   width: "111.1111vw", // Compensates for 90% scale width
-          //   transformOrigin: "0 0",
-          // }}
-        >
+        <div className="origin-top-left">
           <ToastProvider>
             <LayoutComponent>{children}</LayoutComponent>
           </ToastProvider>

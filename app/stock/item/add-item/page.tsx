@@ -1,4 +1,4 @@
-// app/stock/item/add-item/page.tsx
+// app/stock/item/new/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
