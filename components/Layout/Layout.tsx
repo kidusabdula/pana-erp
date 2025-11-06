@@ -1,4 +1,4 @@
-// components/layout.tsx
+// components/Layout/Layout.tsx
 "use client";
 
 import { Button } from "@/components/ui/button";
