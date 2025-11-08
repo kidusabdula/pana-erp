@@ -95,7 +95,7 @@ export default function ItemPage() {
       'Status': item.disabled ? 'Disabled' : 'Enabled',
       'Is Stock Item': item.is_stock_item ? 'Yes' : 'No',
       'Is Fixed Asset': item.is_fixed_asset ? 'Yes' : 'No',
-      'Last Modified': new Date(item.modified).toLocaleString()
+      'Last Modified': item.modified ? new Date(item.modified).toLocaleString() : ''
     }));
   }, [filteredItems]);
 
