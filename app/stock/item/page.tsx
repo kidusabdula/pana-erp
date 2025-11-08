@@ -14,6 +14,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"; // *** IMPORT: AlertDialog components ***
+import {
   Package,
   Plus,
   RefreshCw,
@@ -47,6 +57,10 @@ export default function ItemPage() {
   });
   const [searchQuery, setSearchQuery] = useState("");
 
+  // *** NEW: State for the delete confirmation dialog ***
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
+
   // Fetch items with filters
   const { data: itemsData, isLoading, error, refetch } = useItemsQuery(filters);
   const { data: optionsData } = useItemOptionsQuery();
@@ -76,10 +90,31 @@ export default function ItemPage() {
     refetch();
   };
 
-  const handleDelete = async (item: Item) => {
-    if (window.confirm(`Are you sure you want to delete "${item.item_name}"?`)) {
-      deleteMutation.mutate(item.name);
+  // *** UPDATED: Function to open the delete dialog ***
+  const handleDeleteClick = (item: Item) => {
+    setItemToDelete(item);
+    setIsDeleteDialogOpen(true);
+  };
+
+  // *** NEW: Function to confirm the deletion ***
+  const handleConfirmDelete = () => {
+    if (itemToDelete) {
+      deleteMutation.mutate(itemToDelete.name, {
+        onSuccess: () => {
+          setIsDeleteDialogOpen(false);
+          setItemToDelete(null);
+        },
+        onError: () => {
+          // Keep dialog open on error to allow user to retry or cancel
+        }
+      });
     }
+  };
+
+  // *** NEW: Function to cancel the deletion ***
+  const handleCancelDelete = () => {
+    setIsDeleteDialogOpen(false);
+    setItemToDelete(null);
   };
 
   const handleExport = () => {
@@ -209,8 +244,8 @@ export default function ItemPage() {
                       key={item.name}
                       className="cursor-pointer hover:bg-muted/50"
                       onClick={() => {
-                        const encodedCode = encodeURIComponent(item.item_code);
-                        router.push(`/stock/item/${encodedCode}`);
+                        const encodedName = encodeURIComponent(item.item_name);
+                        router.push(`/stock/item/${encodedName}`);
                       }}
                     >
                       <TableCell className="font-mono text-sm">
@@ -232,8 +267,8 @@ export default function ItemPage() {
                             variant="ghost"
                             size="sm"
                             onClick={() => {
-                              const encodedCode = encodeURIComponent(item.item_code);
-                              router.push(`/stock/item/${encodedCode}`);
+                              const encodedName = encodeURIComponent(item.item_name);
+                              router.push(`/stock/item/${encodedName}`);
                             }}
                           >
                             <Eye className="h-4 w-4" />
@@ -242,8 +277,8 @@ export default function ItemPage() {
                             variant="ghost"
                             size="sm"
                             onClick={() => {
-                              const encodedCode = encodeURIComponent(item.item_code);
-                              router.push(`/stock/item/${encodedCode}/edit`);
+                              const encodedName = encodeURIComponent(item.item_name);
+                              router.push(`/stock/item/${encodedName}/edit`);
                             }}
                           >
                             <Edit className="h-4 w-4" />
@@ -251,7 +286,7 @@ export default function ItemPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDelete(item)}
+                            onClick={() => handleDeleteClick(item)} // *** UPDATED: Call new handler ***
                             disabled={deleteMutation.isPending}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -280,6 +315,30 @@ export default function ItemPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* *** NEW: Delete Confirmation Dialog *** */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the item
+              <span className="font-semibold"> "{itemToDelete?.item_name}" </span>
+              and remove its data from our servers.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelDelete}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleteMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Continue"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

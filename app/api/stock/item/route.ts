@@ -1,4 +1,4 @@
-// app/api/items/route.ts
+// api/stock/item/route.ts
 import { NextRequest } from 'next/server';
 import { frappeClient } from '@/lib/frappe-client';
 import { handleApiRequest, withEndpointLogging } from '@/lib/api-template';
@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
 
   if (action === 'get-item-groups') {
     return handleApiRequest<{ item_groups: string[] }>(
-      withEndpointLogging('/api/items - GET Item Groups')(async () => {
+      withEndpointLogging('/api/stock/item - GET Item Groups')(async () => {
         const itemGroups = await frappeClient.db.getDocList('Item Group', {
           fields: ['name'],
           limit: 1000,
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
 
   if (action === 'get-uoms') {
     return handleApiRequest<{ uoms: string[] }>(
-      withEndpointLogging('/api/items - GET UOMs')(async () => {
+      withEndpointLogging('/api/stock/item - GET UOMs')(async () => {
         const uoms = await frappeClient.db.getDocList('UOM', {
           fields: ['name'],
           limit: 1000,
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 
   // Default: return items list
   return handleApiRequest<{ items: Item[] }>(
-    withEndpointLogging('/api/items - GET')(async () => {
+    withEndpointLogging('/api/stock/item - GET')(async () => {
       const limit = searchParams.get('limit') || '100';
       const fields = ['name', 'item_code', 'item_name', 'stock_uom', 'item_group', 'brand', 'is_stock_item', 'is_fixed_asset', 'disabled', 'modified'];
 
@@ -55,12 +55,10 @@ export async function GET(request: NextRequest) {
   );
 }
 
-
-
 // POST - Create a new item
 export async function POST(request: NextRequest) {
   return handleApiRequest<{ item: Item }>(
-    withEndpointLogging('/api/items - POST')(async () => {
+    withEndpointLogging('/api/stock/item - POST')(async () => {
       const data: ItemCreateRequest = await request.json();
 
       // Validation
@@ -93,7 +91,7 @@ export async function POST(request: NextRequest) {
 // PUT - Update an existing item
 export async function PUT(request: NextRequest) {
   return handleApiRequest<{ item: Item }>(
-    withEndpointLogging('/api/items - PUT')(async () => {
+    withEndpointLogging('/api/stock/item - PUT')(async () => {
       const { searchParams } = new URL(request.url);
       const name = searchParams.get('name');
       
@@ -115,7 +113,7 @@ export async function PUT(request: NextRequest) {
 // DELETE - Delete an item
 export async function DELETE(request: NextRequest) {
   return handleApiRequest<{ message: string }>(
-    withEndpointLogging('/api/items - DELETE')(async () => {
+    withEndpointLogging('/api/stock/item - DELETE')(async () => {
       const { searchParams } = new URL(request.url);
       const name = searchParams.get('name');
       

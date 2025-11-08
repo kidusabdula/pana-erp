@@ -1,10 +1,11 @@
+// api/stock/item/options/route.ts
 import { NextRequest } from 'next/server';
 import { frappeClient } from '@/lib/frappe-client';
 import { handleApiRequest, withEndpointLogging } from '@/lib/api-template';
 
 export async function GET() {
   return handleApiRequest<{ item_groups: string[], uoms: string[] }>(
-    withEndpointLogging('/api/items/options - GET')(async () => {
+    withEndpointLogging('/api/stock/item/options - GET')(async () => {
       // Fetch item groups
       const itemGroups = await frappeClient.db.getDocList('Item Group', {
         fields: ['name'],

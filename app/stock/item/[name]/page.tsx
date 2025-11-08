@@ -37,10 +37,10 @@ interface MovementHistoryItem {
 
 export default function ItemDetailPage() {
   const router = useRouter();
-  const params = useParams<{ code: string }>();
-  const itemCode = decodeURIComponent(params.code);
+  const params = useParams<{ name: string }>();
+  const itemName = decodeURIComponent(params.name);
   
-  const { data: itemData, isLoading, error } = useItemQuery(itemCode);
+  const { data: itemData, isLoading, error } = useItemQuery(itemName);
   const [history] = useState<MovementHistoryItem[]>([]); // Placeholder for history
 
   const item = itemData?.item;
@@ -167,7 +167,7 @@ export default function ItemDetailPage() {
             </Button>
             <Button 
               size="sm"
-              onClick={() => router.push(`/stock/item/${encodeURIComponent(item.item_code)}/edit`)}
+              onClick={() => router.push(`/stock/item/${encodeURIComponent(item.item_name)}/edit`)}
             >
               <Edit className="w-4 h-4 mr-2" />
               Edit
@@ -219,7 +219,6 @@ export default function ItemDetailPage() {
                           <p className="font-medium">{item.brand}</p>
                         </div>
                       )}
-
                                             <div>
                         <p className="text-sm text-muted-foreground">Is Stock Item</p>
                         <p className="font-medium">{item.is_stock_item ? "Yes" : "No"}</p>

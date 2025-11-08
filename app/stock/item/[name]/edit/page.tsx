@@ -28,40 +28,42 @@ import {
 import { Package, Save, ArrowLeft, Calculator, Check, Search } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { itemCreateSchema, ItemCreateFormValues } from "@/hooks/domain/useItemValidation";
-import { useCreateItemMutation, useItemOptionsQuery } from "@/hooks/data/useItemsQuery";
-import { useRouter } from "next/navigation";
+import { itemUpdateSchema, ItemUpdateFormValues } from "@/hooks/domain/useItemValidation";
+import { useUpdateItemMutation, useItemQuery, useItemOptionsQuery } from "@/hooks/data/useItemsQuery";
+import { useRouter, useParams } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 
-export default function AddItemPage() {
+export default function EditItemPage() {
   const router = useRouter();
-  const createMutation = useCreateItemMutation({
-    onSuccess: (data) => {
-      // Get the name of the newly created item
-      const newItemName = data.data.item.item_name;
-      // Redirect to the detail page
-      router.push(`/stock/item/${newItemName}`);
-    },
-  });
+  // *** FIX: Use 'name' to match the dynamic route segment [name] ***
+  const params = useParams<{ name: string }>();
+  const itemName = decodeURIComponent(params.name);
 
+    const updateMutation = useUpdateItemMutation({
+        onSuccess: () => {
+        // After successful update, redirect back to the item detail page
+        router.push(`/stock/item/${itemName}`);
+        },
+    });
+  const { data: itemData, isLoading: itemLoading } = useItemQuery(itemName);
   const { data: optionsData, isLoading: optionsLoading } = useItemOptionsQuery();
 
-  // State to control the open/close state of the Popovers
+  // *** NEW: State for custom dropdowns ***
   const [itemGroupOpen, setItemGroupOpen] = useState(false);
   const [stockUomOpen, setStockUomOpen] = useState(false);
-  
-  // Local state for search queries
   const [itemGroupSearch, setItemGroupSearch] = useState("");
   const [uomSearch, setUomSearch] = useState("");
 
-  const form = useForm({
-    resolver: zodResolver(itemCreateSchema),
+  const form = useForm<ItemUpdateFormValues>({
+    resolver: zodResolver(itemUpdateSchema),
     defaultValues: {
+      name: "",
       item_code: "",
       item_name: "",
       item_group: "",
-      stock_uom: "Nos",
+      stock_uom: "",
       is_stock_item: 1,
       is_fixed_asset: 0,
       description: "",
@@ -69,46 +71,63 @@ export default function AddItemPage() {
     },
   });
 
-  const onSubmit = (data: ItemCreateFormValues) => {
-    createMutation.mutate(data);
+  // Populate form when item data is loaded
+  useEffect(() => {
+    if (itemData?.item) {
+      const item = itemData.item;
+      form.reset({
+        name: item.name,
+        item_code: item.item_code,
+        item_name: item.item_name,
+        item_group: item.item_group,
+        stock_uom: item.stock_uom,
+        is_stock_item: item.is_stock_item,
+        is_fixed_asset: item.is_fixed_asset || 0,
+        description: item.description || "",
+        brand: item.brand || "",
+      });
+    }
+  }, [itemData, form]);
+
+  const onSubmit = (data: ItemUpdateFormValues) => {
+    updateMutation.mutate({
+      name: data.name, // Use the unique 'name' (e.g., P-004) for the update
+      data,
+    });
   };
 
   const handleBack = () => {
-    router.push("/stock/item");
+    router.push(`/stock/item/${itemName}`);
   };
 
-  // Generate item code from item name
-  const generateItemCode = (name: string) => {
-    return name
-      .toLowerCase()
-      .replace(/\s+/g, "-")
-      .replace(/[^a-z0-9-]/g, "")
-      .toUpperCase();
-  };
+  if (itemLoading || optionsLoading) {
+    return (
+      <div className="min-h-screen bg-background p-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex items-center mb-8">
+            <Skeleton className="h-8 w-8 mr-3" />
+            <div>
+              <Skeleton className="h-8 w-48 mb-2" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+          </div>
+          <Skeleton className="h-96 rounded-lg" />
+        </div>
+      </div>
+    );
+  }
 
-  // Auto-generate item code when item name changes
-  useEffect(() => {
-    const subscription = form.watch((value, { name }) => {
-      if (name === "item_name") {
-        const itemName = value.item_name;
-        const currentCode = form.getValues("item_code");
-
-        if (itemName && !currentCode) {
-          const generatedCode = generateItemCode(itemName);
-          form.setValue("item_code", generatedCode, { shouldValidate: true });
-        }
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, [form.watch, form]);
-
-
-  if (optionsLoading) {
+  if (!itemData?.item) {
     return (
       <div className="min-h-screen bg-background p-8 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4">Loading options...</p>
+          <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+          <h2 className="text-xl font-semibold mb-2">Item Not Found</h2>
+          <p className="text-muted-foreground mb-4">The item you're looking for doesn't exist.</p>
+          <Button onClick={handleBack}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back
+          </Button>
         </div>
       </div>
     );
@@ -117,7 +136,7 @@ export default function AddItemPage() {
   const itemGroups = optionsData?.data?.item_groups || [];
   const uoms = optionsData?.data?.uoms || [];
 
-  // Filter logic based on search query
+  // *** NEW: Filter logic for custom dropdowns ***
   const filteredItemGroups = itemGroups.filter((group) =>
     group.toLowerCase().includes(itemGroupSearch.toLowerCase())
   );
@@ -137,19 +156,19 @@ export default function AddItemPage() {
           <div>
             <h1 className="text-3xl font-bold flex items-center">
               <Package className="w-8 h-8 mr-3 text-primary" />
-              New Item
+              Edit Item
             </h1>
-            <p className="text-muted-foreground">Create a new inventory item</p>
+            <p className="text-muted-foreground">Update inventory item details</p>
           </div>
         </div>
         <Button
           form="item-form"
           type="submit"
-          disabled={createMutation.isPending}
+          disabled={updateMutation.isPending}
           className="flex items-center"
         >
           <Save className="w-4 h-4 mr-2" />
-          {createMutation.isPending ? "Creating..." : "Create Item"}
+          {updateMutation.isPending ? "Updating..." : "Update Item"}
         </Button>
       </div>
 
@@ -158,11 +177,10 @@ export default function AddItemPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left Column - Form */}
             <div className="lg:col-span-2 space-y-6">
-              {/* Basic Information */}
               <Card>
                 <CardHeader>
                   <CardTitle>Basic Information</CardTitle>
-                  <CardDescription>Enter the basic details for this item</CardDescription>
+                  <CardDescription>Update details for this item</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -173,10 +191,7 @@ export default function AddItemPage() {
                         <FormItem>
                           <FormLabel>Item Code *</FormLabel>
                           <FormControl>
-                            <Input
-                              placeholder="Enter item code (e.g., ITM-001)"
-                              {...field}
-                            />
+                            <Input placeholder="Enter item code" {...field} disabled />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -189,10 +204,7 @@ export default function AddItemPage() {
                         <FormItem>
                           <FormLabel>Item Name *</FormLabel>
                           <FormControl>
-                            <Input
-                              placeholder="Enter item name"
-                              {...field}
-                            />
+                            <Input placeholder="Enter item name" {...field} />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -201,7 +213,7 @@ export default function AddItemPage() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    {/* Custom Dropdown Implementation for Item Group */}
+                    {/* *** UPDATED: Custom Dropdown for Item Group *** */}
                     <FormField
                       control={form.control}
                       name="item_group"
@@ -226,7 +238,7 @@ export default function AddItemPage() {
                                 </Button>
                               </FormControl>
                             </PopoverTrigger>
-                            <PopoverContent className="w-[200px] p-0" align="start"> {/* *** CHANGE: Set fixed width *** */}
+                            <PopoverContent className="w-[200px] p-0" align="start">
                               <div className="p-3">
                                 <Input
                                   placeholder="Search item group..."
@@ -245,7 +257,7 @@ export default function AddItemPage() {
                                       onClick={() => {
                                         form.setValue("item_group", group, { shouldValidate: true });
                                         setItemGroupOpen(false);
-                                        setItemGroupSearch(""); // Clear search on select
+                                        setItemGroupSearch("");
                                       }}
                                     >
                                       <Check
@@ -267,7 +279,7 @@ export default function AddItemPage() {
                         </FormItem>
                       )}
                     />
-                    {/* Custom Dropdown Implementation for UOM */}
+                    {/* *** UPDATED: Custom Dropdown for UOM *** */}
                     <FormField
                       control={form.control}
                       name="stock_uom"
@@ -292,7 +304,7 @@ export default function AddItemPage() {
                                 </Button>
                               </FormControl>
                             </PopoverTrigger>
-                            <PopoverContent className="w-[200px] p-0" align="start"> {/* *** CHANGE: Set fixed width *** */}
+                            <PopoverContent className="w-[200px] p-0" align="start">
                               <div className="p-3">
                                 <Input
                                   placeholder="Search UOM..."
@@ -311,7 +323,7 @@ export default function AddItemPage() {
                                       onClick={() => {
                                         form.setValue("stock_uom", uom, { shouldValidate: true });
                                         setStockUomOpen(false);
-                                        setUomSearch(""); // Clear search on select
+                                        setUomSearch("");
                                       }}
                                     >
                                       <Check
@@ -344,7 +356,7 @@ export default function AddItemPage() {
                           <FormLabel>Maintain Stock</FormLabel>
                           <Select
                             onValueChange={(value) => field.onChange(parseInt(value))}
-                            defaultValue={String(field.value)}
+                            value={field.value?.toString()}
                           >
                             <FormControl>
                               <SelectTrigger>
@@ -368,7 +380,7 @@ export default function AddItemPage() {
                           <FormLabel>Is Fixed Asset</FormLabel>
                           <Select
                             onValueChange={(value) => field.onChange(parseInt(value))}
-                            defaultValue={String(field.value)}
+                            value={field.value?.toString()}
                           >
                             <FormControl>
                               <SelectTrigger>
@@ -424,7 +436,6 @@ export default function AddItemPage() {
 
             {/* Right Column - Summary */}
             <div>
-              {/* Summary Card */}
               <Card className="sticky top-8">
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -436,15 +447,11 @@ export default function AddItemPage() {
                   <div className="space-y-2">
                     <div className="flex justify-between">
                       <span>Item Code:</span>
-                      <span className="font-medium">
-                        {form.watch("item_code") || "-"}
-                      </span>
+                      <span className="font-medium">{form.watch("item_code") || "-"}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Item Name:</span>
-                      <span className="font-medium">
-                        {form.watch("item_name") || "-"}
-                      </span>
+                      <span className="font-medium">{form.watch("item_name") || "-"}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Item Group:</span>
@@ -466,18 +473,18 @@ export default function AddItemPage() {
 
                   <div className="pt-4 border-t">
                     <div className="text-sm text-muted-foreground">
-                      <p>Fill in all required fields marked with (*) to create the item.</p>
+                      <p>Review changes before updating the item.</p>
                     </div>
                   </div>
 
                   <Button
                     type="submit"
                     form="item-form"
-                    disabled={createMutation.isPending || !form.formState.isValid}
+                    disabled={updateMutation.isPending || !form.formState.isValid}
                     className="w-full"
                   >
                     <Save className="w-4 h-4 mr-2" />
-                    {createMutation.isPending ? "Creating..." : "Create Item"}
+                    {updateMutation.isPending ? "Updating..." : "Update Item"}
                   </Button>
                 </CardContent>
               </Card>

@@ -18,7 +18,7 @@ export function useItemsQuery(filters?: {
       if (filters?.status && filters.status !== "all") params.append("status", filters.status);
       if (filters?.id) params.append("id", filters.id);
       
-      const response = await fetch(`/api/items?${params.toString()}`);
+      const response = await fetch(`/api/stock/item?${params.toString()}`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.details || "Failed to fetch items");
@@ -29,19 +29,19 @@ export function useItemsQuery(filters?: {
   });
 }
 
-// Fetch a single item by code
-export function useItemQuery(code: string) {
+// Fetch a single item by name
+export function useItemQuery(name: string) {
   return useQuery({
-    queryKey: ["item", code],
+    queryKey: ["item", name],
     queryFn: async () => {
-      const response = await fetch(`/api/items/${encodeURIComponent(code)}`);
+      const response = await fetch(`/api/stock/item/${encodeURIComponent(name)}`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || errorData.details || "Failed to fetch item");
       }
       return response.json() as Promise<{ item: Item }>;
     },
-    enabled: !!code,
+    enabled: !!name,
     staleTime: 60 * 1000, // 1 minute
   });
 }
@@ -51,7 +51,7 @@ export function useItemOptionsQuery() {
   return useQuery({
     queryKey: ["itemOptions"],
     queryFn: async () => {
-      const response = await fetch("/api/items/options");
+      const response = await fetch("/api/stock/item/options");
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.details || "Failed to fetch item options");
@@ -63,12 +63,15 @@ export function useItemOptionsQuery() {
 }
 
 // Create a new item
-export function useCreateItemMutation() {
+export function useCreateItemMutation(options?: {
+  onSuccess?: (data: { data: { item: Item } }) => void;
+  onError?: (error: Error) => void;
+}) {
   const queryClient = useQueryClient();
   
   return useMutation({
     mutationFn: async (data: ItemCreateRequest) => {
-      const response = await fetch("/api/items", {
+      const response = await fetch("/api/stock/item", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -82,22 +85,32 @@ export function useCreateItemMutation() {
       return response.json() as Promise<{ data: { item: Item } }>;
     },
     onSuccess: (data) => {
+      // Default success behavior
       toast.success(`Item "${data.data.item.item_name}" created successfully`);
       queryClient.invalidateQueries({ queryKey: ["items"] });
+      
+      // Execute custom onSuccess from options if it exists
+      options?.onSuccess?.(data);
     },
     onError: (error) => {
+      // Default error behavior
       toast.error(`Failed to create item: ${error.message}`);
+      
+      // Execute custom onError from options if it exists
+      options?.onError?.(error);
     },
   });
 }
-
 // Update an existing item
-export function useUpdateItemMutation() {
+export function useUpdateItemMutation(options?: {
+  onSuccess?: (data: { data: { item: Item } }) => void;
+  onError?: (error: Error) => void;
+}) {
   const queryClient = useQueryClient();
   
   return useMutation({
     mutationFn: async ({ name, data }: { name: string; data: ItemUpdateRequest }) => {
-      const response = await fetch(`/api/items?name=${name}`, {
+      const response = await fetch(`/api/stock/item?name=${name}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -111,15 +124,24 @@ export function useUpdateItemMutation() {
       return response.json() as Promise<{ data: { item: Item } }>;
     },
     onSuccess: (data, variables) => {
+      // Default success behavior
       toast.success(`Item "${data.data.item.item_name}" updated successfully`);
       queryClient.invalidateQueries({ queryKey: ["items"] });
       queryClient.invalidateQueries({ queryKey: ["item", variables.name] });
+      
+      // Execute custom onSuccess from options if it exists
+      options?.onSuccess?.(data);
     },
     onError: (error) => {
+      // Default error behavior
       toast.error(`Failed to update item: ${error.message}`);
+      
+      // Execute custom onError from options if it exists
+      options?.onError?.(error);
     },
   });
 }
+
 
 // Delete an item
 export function useDeleteItemMutation() {
@@ -127,7 +149,7 @@ export function useDeleteItemMutation() {
   
   return useMutation({
     mutationFn: async (name: string) => {
-      const response = await fetch(`/api/items?name=${name}`, {
+      const response = await fetch(`/api/stock/item?name=${name}`, {
         method: "DELETE",
       });
       

@@ -8,6 +8,7 @@ export interface FrappeError {
   httpStatusText?: string;
   exceptions?: string[];
   exception?: string;
+  _server_messages?: string; // *** KEY: Add this property ***
 }
 
 // Type guard for FrappeError
@@ -30,7 +31,7 @@ export interface ApiSuccessResponse<T = unknown> {
 export interface ApiErrorResponse {
   success: false;
   error: string;
-  details?: string;
+  details: string; // This will now contain the user-friendly message
   statusCode?: number;
   frappeError?: unknown;
 }
@@ -73,20 +74,60 @@ class FrappeClient {
     return FrappeClient.instance;
   }
 
-  // Helper method to handle Frappe errors
+  // *** UPDATED: Helper method to handle Frappe errors ***
   public handleError(error: unknown): ApiErrorResponse {
     console.error("Frappe Client Error:", error);
 
     if (isFrappeError(error)) {
+      let userFriendlyMessage = "An unexpected error occurred.";
+      let statusCode = error.httpStatus || 500;
+
+      // 1. Try to get the best message from _server_messages (most reliable)
+      if (error._server_messages) {
+        try {
+          const serverMessages = JSON.parse(error._server_messages);
+          if (Array.isArray(serverMessages) && serverMessages.length > 0) {
+            const parsedMessage = JSON.parse(serverMessages[0]);
+            if (parsedMessage.message) {
+              // Sanitize HTML from the message (e.g., <strong>P-004</strong>)
+              userFriendlyMessage = this.sanitizeHtml(parsedMessage.message);
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to parse _server_messages, falling back to default message.");
+        }
+      }
+
+      // 2. Fallback: Infer message from the raw exception string if _server_messages wasn't helpful
+      if (userFriendlyMessage === "An unexpected error occurred.") {
+        const rawError = error.exceptions?.join(' ') || error.exception || '';
+        if (rawError.includes("DuplicateEntryError") || rawError.includes("already exists")) {
+          userFriendlyMessage = "A record with these details already exists.";
+          statusCode = 409;
+        } else if (rawError.includes("PermissionError")) {
+          userFriendlyMessage = "You do not have permission to perform this action.";
+          statusCode = 403;
+        } else if (rawError.includes("DoesNotExistError") || rawError.includes("not found")) {
+          userFriendlyMessage = "The requested resource was not found.";
+          statusCode = 404;
+        } else if (rawError.includes("MandatoryError") || rawError.includes("required")) {
+          userFriendlyMessage = "Required fields are missing.";
+          statusCode = 400;
+        } else {
+            userFriendlyMessage = error.message; // Use the generic message as a last resort
+        }
+      }
+
       return {
         success: false,
-        error: "Frappe API Error",
-        details: error.message,
-        statusCode: error.httpStatus,
+        error: "Request Failed",
+        details: userFriendlyMessage,
+        statusCode,
         frappeError: error.exceptions || error.exception,
       };
     }
 
+    // Fallback for non-Frappe errors
     if (error instanceof Error) {
       return {
         success: false,
@@ -101,56 +142,13 @@ class FrappeClient {
       details: String(error),
     };
   }
-  // lib/frappe-client.ts (add this method to the FrappeClient class)
-  public handleFrappeError(
-    error: unknown,
-    context: string = ""
-  ): ApiErrorResponse {
-    console.error(`Frappe Error [${context}]:`, error);
 
-    if (isFrappeError(error)) {
-      // Handle specific Frappe error types
-      let userFriendlyError = error.message;
-      let statusCode = error.httpStatus || 500;
-
-      // Common Frappe error patterns
-      if (
-        error.message.includes("does not exist") ||
-        error.message.includes("not found")
-      ) {
-        userFriendlyError = "The requested resource was not found";
-        statusCode = 404;
-      } else if (
-        error.message.includes("permission") ||
-        error.message.includes("access")
-      ) {
-        userFriendlyError = "You do not have permission to perform this action";
-        statusCode = 403;
-      } else if (
-        error.message.includes("duplicate") ||
-        error.message.includes("already exists")
-      ) {
-        userFriendlyError = "A record with these details already exists";
-        statusCode = 409;
-      } else if (
-        error.message.includes("required") ||
-        error.message.includes("mandatory")
-      ) {
-        userFriendlyError = "Required fields are missing or invalid";
-        statusCode = 400;
-      }
-
-      return {
-        success: false,
-        error: userFriendlyError,
-        details: error.message,
-        statusCode,
-        frappeError: error.exceptions || error.exception,
-      };
-    }
-
-    // Fallback to generic error handling
-    return this.handleError(error);
+  // *** HELPER: Simple method to remove HTML tags ***
+  private sanitizeHtml(html: string): string {
+    // For production, consider a more robust library like DOMPurify
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    return tempDiv.textContent || tempDiv.innerText || '';
   }
 }
 

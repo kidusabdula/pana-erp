@@ -1,4 +1,4 @@
-import { Item } from "@/types/item";
+import { Item } from "../types/item";
 
 export function exportItemsToCSV(items: Item[]) {
   if (items.length === 0) {
