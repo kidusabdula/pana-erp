@@ -1,42 +1,30 @@
-// app/stock/item/[name]/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
-import { 
-  Package, 
-  ArrowLeft, 
-  Edit, 
+import {
+  Package,
+  ArrowLeft,
+  Edit,
   FileText,
   Download,
   Printer,
-  Share
+  Share,
 } from "lucide-react";
-import { useToast } from "@/components/ui/toast";
+import { useItemQuery } from "@/hooks/data/useItemsQuery";
 import { Skeleton } from "@/components/ui/skeleton";
-
-interface Item {
-  name: string;
-  item_code: string;
-  item_name: string;
-  item_group: string;
-  stock_uom: string;
-  is_stock_item: number;
-  brand?: string;
-  disabled?: number;
-  modified?: string;
-}
+import { toast } from "sonner";
 
 interface MovementHistoryItem {
   id: string;
@@ -48,60 +36,59 @@ interface MovementHistoryItem {
 }
 
 export default function ItemDetailPage() {
-  const { push: toast } = useToast();
   const router = useRouter();
   const params = useParams<{ code: string }>();
-  const [loading, setLoading] = useState(true);
-  const [item, setItem] = useState<Item | null>(null);
-  const [history, setHistory] = useState<MovementHistoryItem[]>([]);
+  const itemCode = decodeURIComponent(params.code);
+  
+  const { data: itemData, isLoading, error } = useItemQuery(itemCode);
+  const [history] = useState<MovementHistoryItem[]>([]); // Placeholder for history
 
-  useEffect(() => {
-    fetchItem();
-  }, [params.code]);
+  const item = itemData?.item;
 
-  const fetchItem = async () => {
-    try {
-      const response = await fetch(`/api/items/${encodeURIComponent(params.code)}`);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || errorData.details || "Failed to fetch item");
-      }
-      
-      const data = await response.json();
-      
-      // Handle different possible response structures
-      if (data.data && data.data.item) {
-        setItem(data.data.item);
-      } else if (data.item) {
-        setItem(data.item);
-      } else {
-        throw new Error("Invalid response format: item data missing");
-      }
-      
-      // For now, we'll use placeholder data for history
-      // In a real implementation, you would fetch this from a separate API endpoint
-      setHistory([]);
-    } catch (error: unknown) {
-      toast({
-        variant: "error",
-        title: "Error",
-        description: `Failed to load item: ${(error as Error).message}`
-      });
-    } finally {
-      setLoading(false);
-    }
+  const handlePrint = () => {
+    window.print();
+    toast.info("Print dialog opened");
+  };
+
+  const handleDownload = () => {
+    // TODO: Implement PDF download
+    toast.info("Download feature coming soon!");
+  };
+
+  const handleShare = () => {
+    // TODO: Implement share functionality
+    toast.info("Share feature coming soon!");
   };
 
   const getStatusColor = (disabled?: number) => {
-    return disabled ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800";
+    return disabled 
+      ? "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400" 
+      : "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
   };
 
   const getStatusText = (disabled?: number) => {
     return disabled ? "Disabled" : "Enabled";
   };
 
-  if (loading) {
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background p-8 flex items-center justify-center">
+        <div className="text-center">
+          <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+          <h2 className="text-xl font-semibold mb-2">Error Loading Item</h2>
+          <p className="text-muted-foreground mb-4">
+            {error.message || "Something went wrong"}
+          </p>
+          <Button onClick={() => router.push("/stock/item")}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Items
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background p-8">
         <div className="max-w-6xl mx-auto">
@@ -134,7 +121,7 @@ export default function ItemDetailPage() {
           <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
           <h2 className="text-xl font-semibold mb-2">Item Not Found</h2>
           <p className="text-muted-foreground mb-4">The item you're looking for doesn't exist.</p>
-          <Button onClick={() => router.push('/stock/item')}>
+          <Button onClick={() => router.push("/stock/item")}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Items
           </Button>
@@ -151,7 +138,7 @@ export default function ItemDetailPage() {
           <div className="flex items-center">
             <Button 
               variant="ghost" 
-              onClick={() => router.push('/stock/item')}
+              onClick={() => router.push("/stock/item")}
               className="mr-4"
             >
               <ArrowLeft className="w-4 h-4 mr-2" />
@@ -166,15 +153,15 @@ export default function ItemDetailPage() {
             </div>
           </div>
           <div className="flex space-x-2">
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={handlePrint}>
               <Printer className="w-4 h-4 mr-2" />
               Print
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={handleDownload}>
               <Download className="w-4 h-4 mr-2" />
               Download
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={handleShare}>
               <Share className="w-4 h-4 mr-2" />
               Share
             </Button>
@@ -232,10 +219,17 @@ export default function ItemDetailPage() {
                           <p className="font-medium">{item.brand}</p>
                         </div>
                       )}
-                      <div>
+
+                                            <div>
                         <p className="text-sm text-muted-foreground">Is Stock Item</p>
                         <p className="font-medium">{item.is_stock_item ? "Yes" : "No"}</p>
                       </div>
+                      {item.description && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Description</p>
+                          <p className="font-medium text-sm">{item.description}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -277,6 +271,7 @@ export default function ItemDetailPage() {
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
+                    <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p>No movement history available for this item.</p>
                   </div>
                 )}
@@ -332,7 +327,7 @@ export default function ItemDetailPage() {
                     <FileText className="w-4 h-4 mr-2" />
                     View Stock Balance
                   </Button>
-                  <Button variant="outline" className="w-full">
+                  <Button variant="outline" className="w-full" onClick={handleDownload}>
                     <Download className="w-4 h-4 mr-2" />
                     Download PDF
                   </Button>
