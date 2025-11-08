@@ -1,0 +1,23 @@
+// styles/print.css
+@media print {
+    body {
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
+    }
+    
+    .no-print {
+      display: none !important;
+    }
+    
+    .print-break-before {
+      page-break-before: always;
+    }
+    
+    .print-break-after {
+      page-break-after: always;
+    }
+    
+    .print-break-inside-avoid {
+      page-break-inside: avoid;
+    }
+  }
