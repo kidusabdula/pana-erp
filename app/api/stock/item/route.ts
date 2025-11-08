@@ -6,43 +6,43 @@ import { Item, ItemCreateRequest, ItemUpdateRequest } from '@/types/item';
 
 // GET - Fetch all items
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const action = searchParams.get('action');
-
-  if (action === 'get-item-groups') {
-    return handleApiRequest<{ item_groups: string[] }>(
-      withEndpointLogging('/api/stock/item - GET Item Groups')(async () => {
-        const itemGroups = await frappeClient.db.getDocList('Item Group', {
-          fields: ['name'],
-          limit: 1000,
-        });
-
-        return { item_groups: itemGroups.map(group => group.name) };
-      })
-    );
-  }
-
-  if (action === 'get-uoms') {
-    return handleApiRequest<{ uoms: string[] }>(
-      withEndpointLogging('/api/stock/item - GET UOMs')(async () => {
-        const uoms = await frappeClient.db.getDocList('UOM', {
-          fields: ['name'],
-          limit: 1000,
-        });
-
-        return { uoms: uoms.map(uom => uom.name) };
-      })
-    );
-  }
-
-  // Default: return items list
   return handleApiRequest<{ items: Item[] }>(
     withEndpointLogging('/api/stock/item - GET')(async () => {
+      const { searchParams } = new URL(request.url);
+      
+      // Extract filter parameters from the URL
+      const nameFilter = searchParams.get('name');
+      const groupFilter = searchParams.get('group');
+      const statusFilter = searchParams.get('status');
       const limit = searchParams.get('limit') || '100';
+
       const fields = ['name', 'item_code', 'item_name', 'stock_uom', 'item_group', 'brand', 'is_stock_item', 'is_fixed_asset', 'disabled', 'modified'];
 
+      const filters: any[] = [];
+
+      // Handle group filter (AND condition)
+      if (groupFilter && groupFilter !== 'all') {
+        filters.push(['item_group', '=', groupFilter]);
+      }
+
+      // Handle status filter (AND condition)
+      if (statusFilter && statusFilter !== 'all') {
+        const isDisabled = statusFilter === 'Disabled' ? 1 : 0;
+        filters.push(['disabled', '=', isDisabled]);
+      }
+
+      // Handle name search (OR condition)
+      if (nameFilter) {
+        // The frappe-js-sdk interprets an array of arrays as an OR clause
+        filters.push([
+          ['item_name', 'like', `%${nameFilter}%`],
+          ['item_code', 'like', `%${nameFilter}%`]
+        ]);
+      }
+      
       const items = await frappeClient.db.getDocList('Item', {
         fields: fields,
+        filters: filters, // Pass the correctly structured filters array
         orderBy: {
           field: 'modified',
           order: 'desc',
@@ -54,7 +54,6 @@ export async function GET(request: NextRequest) {
     })
   );
 }
-
 // POST - Create a new item
 export async function POST(request: NextRequest) {
   return handleApiRequest<{ item: Item }>(

@@ -37,7 +37,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function EditItemPage() {
   const router = useRouter();
-  // *** FIX: Use 'name' to match the dynamic route segment [name] ***
   const params = useParams<{ name: string }>();
   const itemName = decodeURIComponent(params.name);
 
