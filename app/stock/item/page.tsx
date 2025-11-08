@@ -1,3 +1,4 @@
+// app/stock/item/page.tsx
 "use client";
 
 import { useState, useMemo } from "react";
@@ -22,7 +23,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"; // *** IMPORT: AlertDialog components ***
+} from "@/components/ui/alert-dialog";
 import {
   Package,
   Plus,
@@ -37,6 +38,7 @@ import { useItemsQuery, useDeleteItemMutation } from "@/hooks/data/useItemsQuery
 import { useItemOptionsQuery } from "@/hooks/data/useItemsQuery";
 import { FilterDropdown } from "@/components/ui/filter-dropdown";
 import { SearchBar } from "@/components/ui/search-bar";
+import { ExportDialog } from "@/components/ui/export-dialog";
 import { toast } from "sonner";
 import { Item } from "@/types/item";
 
@@ -57,7 +59,7 @@ export default function ItemPage() {
   });
   const [searchQuery, setSearchQuery] = useState("");
 
-  // *** NEW: State for the delete confirmation dialog ***
+  // State for the delete confirmation dialog
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
 
@@ -82,6 +84,21 @@ export default function ItemPage() {
     );
   }, [items, searchQuery]);
 
+  // Prepare data for export with proper headers
+  const exportData = useMemo(() => {
+    return filteredItems.map(item => ({
+      'Item Code': item.item_code,
+      'Item Name': item.item_name,
+      'Item Group': item.item_group,
+      'UOM': item.stock_uom,
+      'Brand': item.brand || '',
+      'Status': item.disabled ? 'Disabled' : 'Enabled',
+      'Is Stock Item': item.is_stock_item ? 'Yes' : 'No',
+      'Is Fixed Asset': item.is_fixed_asset ? 'Yes' : 'No',
+      'Last Modified': new Date(item.modified).toLocaleString()
+    }));
+  }, [filteredItems]);
+
   const handleFilterChange = (newFilters: Filters) => {
     setFilters(newFilters);
   };
@@ -90,36 +107,32 @@ export default function ItemPage() {
     refetch();
   };
 
-  // *** UPDATED: Function to open the delete dialog ***
+  // Function to open the delete dialog
   const handleDeleteClick = (item: Item) => {
     setItemToDelete(item);
     setIsDeleteDialogOpen(true);
   };
 
-  // *** NEW: Function to confirm the deletion ***
+  // Function to confirm the deletion
   const handleConfirmDelete = () => {
     if (itemToDelete) {
       deleteMutation.mutate(itemToDelete.name, {
         onSuccess: () => {
           setIsDeleteDialogOpen(false);
           setItemToDelete(null);
+          toast.success("Item deleted successfully");
         },
-        onError: () => {
-          // Keep dialog open on error to allow user to retry or cancel
+        onError: (error) => {
+          toast.error(`Failed to delete item: ${error.message}`);
         }
       });
     }
   };
 
-  // *** NEW: Function to cancel the deletion ***
+  // Function to cancel the deletion
   const handleCancelDelete = () => {
     setIsDeleteDialogOpen(false);
     setItemToDelete(null);
-  };
-
-  const handleExport = () => {
-    // TODO: Implement CSV export
-    toast.info("Export feature coming soon!");
   };
 
   const getStatusColor = (disabled?: number) => {
@@ -172,10 +185,16 @@ export default function ItemPage() {
             />
             Refresh
           </Button>
-          <Button onClick={handleExport} variant="outline">
-            <Download className="w-4 h-4 mr-2" />
-            Export
-          </Button>
+          <ExportDialog
+            data={exportData}
+            filename="items"
+            title="Inventory Items"
+          >
+            <Button variant="outline">
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </Button>
+          </ExportDialog>
           <Button onClick={() => router.push("/stock/item/new")}>
             <Plus className="w-4 h-4 mr-2" />
             New Item
@@ -286,7 +305,7 @@ export default function ItemPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDeleteClick(item)} // *** UPDATED: Call new handler ***
+                            onClick={() => handleDeleteClick(item)}
                             disabled={deleteMutation.isPending}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -316,7 +335,7 @@ export default function ItemPage() {
         </CardContent>
       </Card>
 
-      {/* *** NEW: Delete Confirmation Dialog *** */}
+      {/* Delete Confirmation Dialog */}
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
