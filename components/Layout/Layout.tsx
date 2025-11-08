@@ -44,8 +44,10 @@ import {
   Calculator,
   MapPin,                // “Locations”
   ArrowLeftRight,        // “Movements”
-  TrendingUpDown,        // “Value Adjustments” (no lucide icon, picked closest)
+  TrendingUpDown,        // “Value Adjustments”
   Settings2,             // “Maintenance”
+  PanelLeftOpen,         // *** NEW: Icon for an open/collapsible sidebar ***
+  PanelLeftClose,        // *** NEW: Icon for a closed/expanded sidebar ***
 } from "lucide-react";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
@@ -93,7 +95,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {!isCollapsed ? (
             <h2 className="text-lg font-extrabold flex items-center">
               <img src="/logo.png" alt="VersaForge ERP Logo" className="mr-2 h-6 w-6" />
-              VersaForge ERP
+              Pana ERP
             </h2>
           ) : (
             <div className="flex justify-center w-full">
@@ -106,10 +108,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             onClick={toggleSidebar}
             className="h-3 w-3 flex-shrink-0"
           >
+            {/* *** UPDATED: Use new, aesthetic sidebar toggle icons *** */}
             {isCollapsed ? (
-              <ChevronRight className="h-4 w-4" />
+              <PanelLeftOpen className="h-4 w-4" />
             ) : (
-              <ChevronLeft className="h-4 w-4" />
+              <PanelLeftClose className="h-4 w-4" />
             )}
           </Button>
         </div>
