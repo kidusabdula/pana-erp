@@ -101,7 +101,7 @@ export default function AddMaterialReceiptPage() {
   const fetchOptions = async () => {
     setOptionsLoading(true);
     try {
-      const response = await fetch('/api/stock-entries/options');
+      const response = await fetch('/api/stock/stock-entries/options');
       if (!response.ok) {
         throw new Error('Failed to load options');
       }
@@ -212,7 +212,7 @@ export default function AddMaterialReceiptPage() {
         items: itemsWithAmounts,
       };
       
-      const response = await fetch('/api/stock-entries', {
+      const response = await fetch('/api/stock/stock-entries', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

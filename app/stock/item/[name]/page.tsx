@@ -3,13 +3,7 @@
 
 import { useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -20,8 +14,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Package, ArrowLeft, Edit, FileText } from "lucide-react";
+import {
+  Package,
+  ArrowLeft,
+  Edit,
+  FileText,
+} from "lucide-react";
 import { useItemQuery } from "@/hooks/data/useItemsQuery";
+import { useDetailActions } from "@/hooks/useDetailActions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DetailHeaderActions } from "@/components/ui/detail-header-actions";
 import { toast } from "sonner";
@@ -39,30 +39,29 @@ export default function ItemDetailPage() {
   const router = useRouter();
   const params = useParams<{ name: string }>();
   const itemName = decodeURIComponent(params.name);
-
+  
   const { data: itemData, isLoading, error } = useItemQuery(itemName);
   const [history] = useState<MovementHistoryItem[]>([]); // Placeholder for history
+  const { handlePrint, handleDownload, isProcessing } = useDetailActions();
 
   const item = itemData?.item;
 
   // Prepare data for export/download
   const exportData = useMemo(() => {
     if (!item) return [];
-
-    return [
-      {
-        "Item Code": item.item_code,
-        "Item Name": item.item_name,
-        "Item Group": item.item_group,
-        UOM: item.stock_uom,
-        Brand: item.brand || "",
-        Status: item.disabled ? "Disabled" : "Enabled",
-        "Is Stock Item": item.is_stock_item ? "Yes" : "No",
-        "Is Fixed Asset": item.is_fixed_asset ? "Yes" : "No",
-        Description: item.description || "",
-        "Last Modified": new Date(item.modified).toLocaleString(),
-      },
-    ];
+    
+    return [{
+      'Item Code': item.item_code,
+      'Item Name': item.item_name,
+      'Item Group': item.item_group,
+      'UOM': item.stock_uom,
+      'Brand': item.brand || '',
+      'Status': item.disabled ? 'Disabled' : 'Enabled',
+      'Is Stock Item': item.is_stock_item ? 'Yes' : 'No',
+      'Is Fixed Asset': item.is_fixed_asset ? 'Yes' : 'No',
+      'Description': item.description || '',
+      'Last Modified': item.modified ? new Date(item.modified).toLocaleString() : ''
+    }];
   }, [item]);
 
   if (error) {
@@ -94,7 +93,7 @@ export default function ItemDetailPage() {
               <Skeleton className="h-4 w-64" />
             </div>
           </div>
-
+          
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
               <Skeleton className="h-64 rounded-lg" />
@@ -115,9 +114,7 @@ export default function ItemDetailPage() {
         <div className="text-center">
           <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
           <h2 className="text-xl font-semibold mb-2">Item Not Found</h2>
-          <p className="text-muted-foreground mb-4">
-            The item you're looking for doesn't exist.
-          </p>
+          <p className="text-muted-foreground mb-4">The item you're looking for doesn't exist.</p>
           <Button onClick={() => router.push("/stock/item")}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Items
@@ -128,8 +125,8 @@ export default function ItemDetailPage() {
   }
 
   const getStatusColor = (disabled?: number) => {
-    return disabled
-      ? "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400"
+    return disabled 
+      ? "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400" 
       : "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
   };
 
@@ -143,8 +140,8 @@ export default function ItemDetailPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center">
-            <Button
-              variant="ghost"
+            <Button 
+              variant="ghost" 
               onClick={() => router.push("/stock/item")}
               className="mr-4"
             >
@@ -156,31 +153,19 @@ export default function ItemDetailPage() {
                 <Package className="w-8 h-8 mr-3 text-primary" />
                 Item Details
               </h1>
-              <p className="text-muted-foreground">
-                View and manage item details
-              </p>
+              <p className="text-muted-foreground">View and manage item details</p>
             </div>
           </div>
           <DetailHeaderActions
             data={item}
-            printElementId="item-details-content"
-            shareTitle={`${item.item_name} - Item Details`}
-            shareText={`View details for ${item.item_name} (${item.item_code})`}
             downloadData={exportData}
             downloadFilename={`item-${item.item_code}`}
             downloadTitle={`${item.item_name} - Item Details`}
-            onEdit={() =>
-              router.push(
-                `/stock/item/${encodeURIComponent(item.item_name)}/edit`
-              )
-            }
+            onEdit={() => router.push(`/stock/item/${encodeURIComponent(item.item_name)}/edit`)}
           />
         </div>
 
-        <div
-          id="item-details-content"
-          className="grid grid-cols-1 lg:grid-cols-3 gap-6"
-        >
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Details */}
           <div className="lg:col-span-2 space-y-6">
             {/* Basic Information */}
@@ -193,15 +178,11 @@ export default function ItemDetailPage() {
                   <div>
                     <div className="space-y-4">
                       <div>
-                        <p className="text-sm text-muted-foreground">
-                          Item Code
-                        </p>
+                        <p className="text-sm text-muted-foreground">Item Code</p>
                         <p className="font-medium text-lg">{item.item_code}</p>
                       </div>
                       <div>
-                        <p className="text-sm text-muted-foreground">
-                          Item Name
-                        </p>
+                        <p className="text-sm text-muted-foreground">Item Name</p>
                         <p className="font-medium">{item.item_name}</p>
                       </div>
                       <div>
@@ -215,15 +196,11 @@ export default function ItemDetailPage() {
                   <div>
                     <div className="space-y-4">
                       <div>
-                        <p className="text-sm text-muted-foreground">
-                          Item Group
-                        </p>
+                        <p className="text-sm text-muted-foreground">Item Group</p>
                         <p className="font-medium">{item.item_group}</p>
                       </div>
                       <div>
-                        <p className="text-sm text-muted-foreground">
-                          Stock UOM
-                        </p>
+                        <p className="text-sm text-muted-foreground">Stock UOM</p>
                         <p className="font-medium">{item.stock_uom}</p>
                       </div>
                       {item.brand && (
@@ -233,21 +210,13 @@ export default function ItemDetailPage() {
                         </div>
                       )}
                       <div>
-                        <p className="text-sm text-muted-foreground">
-                          Is Stock Item
-                        </p>
-                        <p className="font-medium">
-                          {item.is_stock_item ? "Yes" : "No"}
-                        </p>
+                        <p className="text-sm text-muted-foreground">Is Stock Item</p>
+                        <p className="font-medium">{item.is_stock_item ? "Yes" : "No"}</p>
                       </div>
                       {item.description && (
                         <div>
-                          <p className="text-sm text-muted-foreground">
-                            Description
-                          </p>
-                          <p className="font-medium text-sm">
-                            {item.description}
-                          </p>
+                          <p className="text-sm text-muted-foreground">Description</p>
+                          <p className="font-medium text-sm">{item.description}</p>
                         </div>
                       )}
                     </div>
@@ -279,10 +248,9 @@ export default function ItemDetailPage() {
                             <TableCell>{record.date}</TableCell>
                             <TableCell>{record.type}</TableCell>
                             <TableCell>
-                              {record.type === "ISSUE" || record.type === "SELL"
-                                ? `-${record.qty}`
-                                : `+${record.qty}`}{" "}
-                              {record.uom || ""}
+                              {record.type === "ISSUE" || record.type === "SELL" 
+                                ? `-${record.qty}` 
+                                : `+${record.qty}`} {record.uom || ""}
                             </TableCell>
                             <TableCell>{record.reference || ""}</TableCell>
                           </TableRow>
@@ -348,23 +316,16 @@ export default function ItemDetailPage() {
                     <FileText className="w-4 h-4 mr-2" />
                     View Stock Balance
                   </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => {
-                      import("@/lib/detail-actions-utils").then(
-                        ({ downloadData }) => {
-                          downloadData(
-                            exportData,
-                            `item-${item.item_code}`,
-                            `${item.item_name} - Item Details`,
-                            "pdf"
-                          ).then(() => {
-                            toast.success("PDF downloaded successfully");
-                          });
-                        }
-                      );
-                    }}
+                  <Button 
+                    variant="outline" 
+                    className="w-full" 
+                    onClick={() => handleDownload(
+                      exportData,
+                      `item-${item.item_code}`,
+                      `${item.item_name} - Item Details`,
+                      "pdf"
+                    )}
+                    disabled={isProcessing}
                   >
                     <FileText className="w-4 h-4 mr-2" />
                     Download PDF

@@ -1,87 +1,102 @@
 // lib/detail-actions-utils.ts
 import { ExportableItem, exportToCSV, exportToPDF } from './export-utils';
 
-// Share functionality
-export function shareData(
-  title: string,
-  text: string,
-  url?: string
-): Promise<void> | void {
-  if (navigator.share) {
-    // Use Web Share API if available
-    return navigator.share({
-      title,
-      text,
-      url: url || window.location.href,
-    });
-  } else {
-    // Fallback: Copy to clipboard
-    const shareText = `${title}\n${text}\n${url || window.location.href}`;
-    navigator.clipboard.writeText(shareText).then(() => {
-      return Promise.resolve();
-    });
-  }
-}
-
-// Print functionality
-export function printElement(elementId: string): void {
-  const element = document.getElementById(elementId);
-  if (!element) {
-    console.error(`Element with ID ${elementId} not found`);
-    return;
-  }
-
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) {
-    console.error('Failed to open print window');
-    return;
-  }
-
-  // Clone the element to avoid modifying the original
-  const clonedElement = element.cloneNode(true) as HTMLElement;
-  
-  // Create a new document with the cloned element
-  printWindow.document.write(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Print</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          table { width: 100%; border-collapse: collapse; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; }
-          .no-print { display: none; }
-          @media print {
-            .no-print { display: none; }
-          }
-        </style>
-      </head>
-      <body>
-        ${clonedElement.innerHTML}
-      </body>
-    </html>
-  `);
-  
-  printWindow.document.close();
-  printWindow.focus();
-  
-  // Wait for the content to load before printing
-  setTimeout(() => {
-    printWindow.print();
-    printWindow.close();
-  }, 500);
-}
-
-// Print functionality for generating PDF
-export async function printToPDF<T extends ExportableItem>(
+// Print functionality - generates and prints PDF
+export async function printPDF<T extends ExportableItem>(
   data: T[],
   filename: string,
   title: string,
   headers?: { [key: string]: string }
 ): Promise<void> {
-  // Reuse the PDF export functionality
-  await exportToPDF(data, filename, title, headers);
+  try {
+    // Generate the PDF
+    await exportToPDF(data, filename, title, headers);
+    
+    // Get the PDF blob URL
+    const pdfBlob = await generatePDFBlob(data, filename, title, headers);
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+    
+    // Open the PDF in a new window and trigger print
+    const printWindow = window.open(pdfUrl, '_blank');
+    if (printWindow) {
+      printWindow.onload = () => {
+        printWindow.print();
+        // Clean up the object URL after printing
+        setTimeout(() => {
+          URL.revokeObjectURL(pdfUrl);
+          printWindow.close();
+        }, 100);
+      };
+    } else {
+      // Fallback if popup is blocked
+      const link = document.createElement('a');
+      link.href = pdfUrl;
+      link.download = `${filename}.pdf`;
+      link.click();
+      URL.revokeObjectURL(pdfUrl);
+    }
+  } catch (error) {
+    console.error('Print PDF failed:', error);
+    throw error;
+  }
+}
+
+// Helper function to generate PDF blob
+async function generatePDFBlob<T extends ExportableItem>(
+  data: T[],
+  filename: string,
+  title: string,
+  headers?: { [key: string]: string }
+): Promise<Blob> {
+  // Dynamic import to avoid SSR issues
+  const { jsPDF } = await import('jspdf');
+  const { autoTable } = await import('jspdf-autotable');
+  
+  if (data.length === 0) {
+    throw new Error('No data to generate PDF');
+  }
+
+  // Get all keys from the first item to use as columns
+  const keys = Object.keys(data[0]);
+  
+  // Create header row
+  const headerRow = keys.map(key => headers?.[key] || key);
+  
+  // Create data rows
+  const dataRows = data.map(item => 
+    keys.map(key => {
+      const value = item[key];
+      // Convert to string and handle null/undefined
+      return value !== null && value !== undefined ? String(value) : '';
+    })
+  );
+  
+  // Create PDF document
+  const doc = new jsPDF();
+  
+  // Add title
+  doc.setFontSize(18);
+  doc.text(title, 14, 22);
+  
+  // Add date
+  doc.setFontSize(11);
+  doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+  
+  // Add table
+  autoTable(doc, {
+    head: [headerRow],
+    body: dataRows,
+    startY: 40,
+    theme: 'striped',
+    headStyles: { fillColor: [66, 66, 66] },
+    styles: { fontSize: 9 },
+    columnStyles: {
+      0: { cellWidth: 30 } // Adjust column widths as needed
+    }
+  });
+  
+  // Return the PDF as a blob
+  return doc.output('blob');
 }
 
 // Download functionality

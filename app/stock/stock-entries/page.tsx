@@ -130,7 +130,7 @@ export default function StockEntriesPage() {
           }
         });
 
-        const response = await fetch(`/api/stock-entries?${params}`);
+        const response = await fetch(`/api/stock/stock-entries?${params}`);
         if (!response.ok) {
           throw new Error("Failed to fetch stock entries");
         }

@@ -1,14 +1,11 @@
 // components/ui/detail-header-actions.tsx
 import { Button } from "@/components/ui/button";
-import { Edit, Printer, Download, Share } from "lucide-react";
+import { Edit, Printer, Download } from "lucide-react";
 import { DetailActions } from "./detail-actions";
 import { ExportableItem } from "@/lib/export-utils";
 
 interface DetailHeaderActionsProps {
   data: ExportableItem;
-  printElementId?: string;
-  shareTitle?: string;
-  shareText?: string;
   downloadData?: ExportableItem[];
   downloadFilename?: string;
   downloadTitle?: string;
@@ -18,51 +15,58 @@ interface DetailHeaderActionsProps {
 
 export function DetailHeaderActions({
   data,
-  printElementId,
-  shareTitle,
-  shareText,
   downloadData,
   downloadFilename,
   downloadTitle,
   downloadHeaders,
   onEdit,
 }: DetailHeaderActionsProps) {
+  const handlePrint = async () => {
+    if (!downloadData || downloadData.length === 0) {
+      return;
+    }
+
+    try {
+      const { printPDF } = await import('@/lib/detail-actions-utils');
+      await printPDF(
+        downloadData,
+        downloadFilename || "item-details",
+        downloadTitle || "Item Details",
+        downloadHeaders
+      );
+    } catch (error) {
+      console.error("Print failed:", error);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!downloadData || downloadData.length === 0) {
+      return;
+    }
+
+    try {
+      const { downloadData: downloadUtil } = await import('@/lib/detail-actions-utils');
+      await downloadUtil(
+        downloadData,
+        downloadFilename || "item-details",
+        downloadTitle || "Item Details",
+        "pdf",
+        downloadHeaders
+      );
+    } catch (error) {
+      console.error("Download failed:", error);
+    }
+  };
+
   return (
     <div className="flex space-x-2">
-      <Button variant="outline" size="sm" onClick={() => window.print()}>
+      <Button variant="outline" size="sm" onClick={handlePrint}>
         <Printer className="w-4 h-4 mr-2" />
         Print
       </Button>
-      <Button variant="outline" size="sm" onClick={() => {
-        if (downloadData && downloadData.length > 0) {
-          import('@/lib/detail-actions-utils').then(({ printToPDF }) => {
-            printToPDF(
-              downloadData,
-              downloadFilename || "item-details",
-              downloadTitle || "Item Details",
-              downloadHeaders
-            ).then(() => {
-              // Show success message
-            });
-          });
-        }
-      }}>
+      <Button variant="outline" size="sm" onClick={handleDownload}>
         <Download className="w-4 h-4 mr-2" />
         Download
-      </Button>
-      <Button variant="outline" size="sm" onClick={() => {
-        import('@/lib/detail-actions-utils').then(({ shareData }) => {
-          shareData(
-            shareTitle || "Item Details",
-            shareText || `View details for ${data.name || data.item_name || "this item"}`,
-            window.location.href
-          ).then(() => {
-            // Show success message
-          });
-        });
-      }}>
-        <Share className="w-4 h-4 mr-2" />
-        Share
       </Button>
       {onEdit && (
         <Button size="sm" onClick={onEdit}>

@@ -92,7 +92,7 @@ export default function DeliveryNoteDetailPage() {
 
   const fetchDeliveryNote = async () => {
     try {
-      const response = await fetch(`/api/delivery-notes/${params.name}`);
+      const response = await fetch(`/api/stock/delivery-notes/${params.name}`);
       if (!response.ok) {
         throw new Error('Failed to fetch delivery note');
       }

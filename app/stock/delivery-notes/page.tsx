@@ -113,7 +113,7 @@ export default function DeliveryNotesPage() {
           }
         });
 
-        const response = await fetch(`/api/delivery-notes?${params}`);
+        const response = await fetch(`/api/stock/delivery-notes?${params}`);
         if (!response.ok) {
           throw new Error("Failed to fetch delivery notes");
         }

@@ -18,17 +18,14 @@ import {
 } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { MoreHorizontal, Download, Printer, Share, FileText, FileSpreadsheet } from "lucide-react";
-import { shareData, printElement, printToPDF, downloadData } from "@/lib/detail-actions-utils";
+import { MoreHorizontal, Download, Printer, FileText, FileSpreadsheet } from "lucide-react";
+import { printPDF, downloadData as downloadFile } from "@/lib/detail-actions-utils";
 import { ExportableItem } from "@/lib/export-utils";
 import { toast } from "sonner";
 
 interface DetailActionsProps {
   data: ExportableItem;
-  printElementId?: string;
-  shareTitle?: string;
-  shareText?: string;
-  downloadData?: ExportableItem[];
+  dataToDownload?: ExportableItem[];
   downloadFilename?: string;
   downloadTitle?: string;
   downloadHeaders?: { [key: string]: string };
@@ -36,10 +33,7 @@ interface DetailActionsProps {
 
 export function DetailActions({
   data,
-  printElementId,
-  shareTitle,
-  shareText,
-  downloadData,
+  dataToDownload,
   downloadFilename,
   downloadTitle,
   downloadHeaders,
@@ -48,64 +42,39 @@ export function DetailActions({
   const [downloadFormat, setDownloadFormat] = useState<"csv" | "pdf">("pdf");
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const handleShare = async () => {
-    try {
-      await shareData(
-        shareTitle || "Item Details",
-        shareText || `View details for ${data.name || data.item_name || "this item"}`,
-        window.location.href
-      );
-      toast.success("Item details shared successfully");
-    } catch (error) {
-      console.error("Share failed:", error);
-      toast.error("Failed to share item details");
-    }
-  };
-
-  const handlePrint = () => {
-    if (printElementId) {
-      printElement(printElementId);
-      toast.info("Print dialog opened");
-    } else {
-      // Fallback to browser print
-      window.print();
-      toast.info("Print dialog opened");
-    }
-  };
-
-  const handlePrintPDF = async () => {
-    if (!downloadData || downloadData.length === 0) {
-      toast.warning("No data available for PDF generation");
+  const handlePrint = async () => {
+    if (!dataToDownload || dataToDownload.length === 0) {
+      toast.warning("No data available for printing");
       return;
     }
 
     setIsDownloading(true);
     try {
-      await printToPDF(
-        downloadData,
+      await printPDF(
+        dataToDownload,
         downloadFilename || "item-details",
         downloadTitle || "Item Details",
         downloadHeaders
       );
-      toast.success("PDF generated successfully");
+      toast.success("Print dialog opened");
     } catch (error) {
-      console.error("PDF generation failed:", error);
-      toast.error("Failed to generate PDF");
+      console.error("Print failed:", error);
+      toast.error("Failed to open print dialog");
     } finally {
       setIsDownloading(false);
     }
   };
 
   const handleDownload = async () => {
-    if (!downloadData || downloadData.length === 0) {
+    if (!dataToDownload || dataToDownload.length === 0) {
       toast.warning("No data available for download");
       return;
     }
 
     setIsDownloading(true);
     try {
-      await downloadData(
-        downloadData,
+      await downloadFile(
+        dataToDownload,
         downloadFilename || "item-details",
         downloadTitle || "Item Details",
         downloadFormat,
@@ -130,17 +99,9 @@ export function DetailActions({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={handleShare}>
-            <Share className="mr-2 h-4 w-4" />
-            Share
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handlePrint}>
+          <DropdownMenuItem onClick={handlePrint} disabled={isDownloading}>
             <Printer className="mr-2 h-4 w-4" />
-            Print
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handlePrintPDF}>
-            <FileText className="mr-2 h-4 w-4" />
-            Print to PDF
+            Print PDF
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setDownloadDialogOpen(true)}>

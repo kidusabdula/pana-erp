@@ -70,7 +70,7 @@ export default function StockEntryDetailPage() {
 
   const fetchStockEntry = async () => {
     try {
-      const response = await fetch(`/api/stock-entries/${params.name}`);
+      const response = await fetch(`/api/stock/stock-entries/${params.name}`);
       if (!response.ok) {
         throw new Error('Failed to fetch stock entry');
       }

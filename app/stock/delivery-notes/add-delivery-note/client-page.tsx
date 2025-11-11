@@ -1,4 +1,4 @@
-// app/stock/stock-entries/add-manufacture/page.tsx
+// app/stock/delivery-notes/add-delivery-note/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -23,7 +23,7 @@ import {
   TableRow 
 } from "@/components/ui/table";
 import { 
-  Package, 
+  TruckIcon, 
   Plus, 
   Minus, 
   Save, 
@@ -36,61 +36,60 @@ import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 
-interface StockEntryItemForm {
+interface DeliveryNoteItemForm {
   item_code: string;
   item_name: string;
   qty: number;
   uom: string;
   rate: number;
-  warehouse?: string;
-  target_warehouse?: string;
+  amount: number;
+  warehouse: string;
   batch_no?: string;
   serial_no?: string;
-  is_finished_item: boolean;
+  against_sales_order?: string;
 }
 
 interface DropdownOptions {
+  customers: string[];
   companies: string[];
   warehouses: string[];
-  stockEntryTypes: string[];
-  purposes: string[];
-  uoms: string[];
+  territories: string[];
   items: Array<{
     item_code: string;
     item_name: string;
     stock_uom: string;
     valuation_rate: number;
   }>;
+  uoms: string[];
 }
 
-export default function AddManufacturePage() {
+interface AddDeliveryNotePageProps {
+  postingDate: string;
+  postingTime: string;
+}
+
+export default function AddDeliveryNotePage({ postingDate, postingTime }: AddDeliveryNotePageProps) {
   const { push: toast } = useToast();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [options, setOptions] = useState<DropdownOptions | null>(null);
   const [itemSearchQuery, setItemSearchQuery] = useState("");
-  const [finishedGoodSearchQuery, setFinishedGoodSearchQuery] = useState("");
   const [filteredItems, setFilteredItems] = useState<any[]>([]);
-  const [filteredFinishedGoods, setFilteredFinishedGoods] = useState<any[]>([]);
   const [showItemDropdown, setShowItemDropdown] = useState(false);
-  const [showFinishedGoodDropdown, setShowFinishedGoodDropdown] = useState(false);
   
   const [formData, setFormData] = useState({
-    stock_entry_type: "Manufacture",
-    purpose: "Manufacture" as const,
-    posting_date: new Date().toISOString().split('T')[0],
-    posting_time: new Date().toTimeString().slice(0, 5),
+    customer: "",
+    posting_date: postingDate,
+    posting_time: postingTime,
     company: "",
-    work_order: "",
-    batch_no: "",
-    production_order: "",
-    finished_goods: "",
-    finished_goods_name: "",
-    finished_qty: 1,
-    finished_uom: "Nos",
-    to_warehouse: "",
-    items: [] as StockEntryItemForm[]
+    set_warehouse: "",
+    territory: "",
+    tax_id: "",
+    sales_order: "",
+    customer_address: "",
+    contact_person: "",
+    items: [] as DeliveryNoteItemForm[]
   });
 
   useEffect(() => {
@@ -112,32 +111,16 @@ export default function AddManufacturePage() {
     }
   }, [itemSearchQuery, options]);
 
-  useEffect(() => {
-    if (options && finishedGoodSearchQuery) {
-      const query = finishedGoodSearchQuery.toLowerCase();
-      const filtered = options.items.filter(item => 
-        item.item_name.toLowerCase().includes(query) ||
-        item.item_code.toLowerCase().includes(query)
-      );
-      setFilteredFinishedGoods(filtered);
-      setShowFinishedGoodDropdown(true);
-    } else {
-      setFilteredFinishedGoods(options?.items || []);
-      setShowFinishedGoodDropdown(false);
-    }
-  }, [finishedGoodSearchQuery, options]);
-
   const fetchOptions = async () => {
     setOptionsLoading(true);
     try {
-      const response = await fetch('/api/stock/stock-entries/options');
+      const response = await fetch('/api/stock/delivery-notes/options');
       if (!response.ok) {
         throw new Error('Failed to load options');
       }
       const data = await response.json();
       setOptions(data.data);
       setFilteredItems(data.data.items);
-      setFilteredFinishedGoods(data.data.items);
     } catch (error) {
       toast({
         variant: "error",
@@ -153,36 +136,27 @@ export default function AddManufacturePage() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleItemSelect = (index: number, selectedItemInfo: { item_code: string; item_name: string; stock_uom: string; valuation_rate: number; }) => {
+  const handleItemSelect = (item: any) => {
+    const newItem = {
+      item_code: item.item_code,
+      item_name: item.item_name,
+      qty: 1,
+      uom: item.stock_uom,
+      rate: Number(item.valuation_rate) || 0,
+      amount: Number(item.valuation_rate) || 0,
+      warehouse: formData.set_warehouse
+    };
+    
     setFormData(prev => ({
       ...prev,
-      items: prev.items.map((item, i) =>
-        i === index
-          ? {
-              ...item,
-              item_code: selectedItemInfo.item_code,
-              item_name: selectedItemInfo.item_name,
-              uom: selectedItemInfo.stock_uom,
-              rate: selectedItemInfo.valuation_rate,
-            }
-          : item
-      ),
+      items: [...prev.items, newItem]
     }));
+    
+    setItemSearchQuery("");
+    setShowItemDropdown(false);
   };
 
-  const handleFinishedGoodSelect = (item: any) => {
-    setFormData(prev => ({
-      ...prev,
-      finished_goods: item.item_code,
-      finished_goods_name: item.item_name,
-      finished_uom: item.stock_uom,
-      finished_qty: prev.finished_qty || 1
-    }));
-    setFinishedGoodSearchQuery("");
-    setShowFinishedGoodDropdown(false);
-  };
-
-  const addRawMaterial = () => {
+  const addItem = () => {
     setFormData(prev => ({
       ...prev,
       items: [...prev.items, { 
@@ -191,55 +165,35 @@ export default function AddManufacturePage() {
         qty: 1, 
         uom: "Nos", 
         rate: 0,
-        is_finished_item: false
-      }],
+        amount: 0,
+        warehouse: prev.set_warehouse
+      }]
     }));
-  };
-
-  const addFinishedGood = () => {
-    if (!formData.finished_goods) {
-      toast({
-        variant: "error",
-        title: "Error",
-        description: "Please select a finished good first"
-      });
-      return;
-    }
-    
-    const selectedItem = options?.items.find(item => item.item_code === formData.finished_goods);
-    if (selectedItem) {
-      setFormData(prev => ({
-        ...prev,
-        items: [...prev.items, { 
-          item_code: prev.finished_goods, 
-          item_name: prev.finished_goods_name,
-          qty: prev.finished_qty, 
-          uom: prev.finished_uom, 
-          rate: selectedItem.valuation_rate || 0,
-          target_warehouse: prev.to_warehouse,
-          is_finished_item: true
-        }],
-      }));
-    }
   };
 
   const removeItem = (index: number) => {
     setFormData(prev => ({
       ...prev,
-      items: prev.items.filter((_, i) => i !== index),
+      items: prev.items.filter((_, i) => i !== index)
     }));
   };
 
-  const updateItem = (index: number, field: keyof StockEntryItemForm, value: string | number | boolean) => {
+  const updateItem = (index: number, field: keyof DeliveryNoteItemForm, value: string | number) => {
     setFormData(prev => ({
       ...prev,
       items: prev.items.map((item, i) => {
         if (i === index) {
           const updatedItem = { ...item, [field]: value };
+          // Recalculate amount if rate or quantity changes
+          if (field === 'rate' || field === 'qty') {
+            const newQty = Number(updatedItem.qty) || 0; // Ensure qty is a number, default to 0
+            const newRate = Number(updatedItem.rate) || 0; // Ensure rate is a number, default to 0
+            updatedItem.amount = newQty * newRate;
+          }
           return updatedItem;
         }
         return item;
-      }),
+      })
     }));
   };
 
@@ -248,16 +202,17 @@ export default function AddManufacturePage() {
       ...prev,
       items: prev.items.map((item, i) => {
         if (i === index) {
-          const newQty = Math.max(0.01, item.qty + delta);
-          return { ...item, qty: newQty };
+          const currentQty = Number(item.qty) || 0;
+          const newQty = Math.max(1, currentQty + delta);
+          return { ...item, qty: newQty, amount: newQty * (Number(item.rate) || 0) };
         }
         return item;
-      }),
+      })
     }));
   };
 
   const calculateTotals = () => {
-    const subtotal = formData.items.reduce((sum, item) => sum + (item.qty * item.rate), 0);
+    const subtotal = formData.items.reduce((sum, item) => sum + item.amount, 0);
     const tax = subtotal * 0.15; // 15% VAT
     const total = subtotal + tax;
     return { subtotal, tax, total };
@@ -267,59 +222,39 @@ export default function AddManufacturePage() {
     e.preventDefault();
     setLoading(true);
     try {
-      if (!formData.company || !formData.to_warehouse || formData.items.length === 0) {
-        throw new Error('Missing required fields');
+      if (!formData.customer || !formData.posting_date || formData.items.length === 0) {
+        throw new Error('Missing required fields: customer, posting date, and items');
+      }
+      if (!formData.set_warehouse) {
+        throw new Error('Warehouse is required');
       }
       
-      const rawMaterials = formData.items.filter(item => !item.is_finished_item);
-      const finishedGoods = formData.items.filter(item => item.is_finished_item);
-      
-      if (rawMaterials.length === 0) {
-        throw new Error('At least one raw material is required');
-      }
-      
-      if (finishedGoods.length === 0) {
-        throw new Error('At least one finished good is required');
-      }
-      
-      const itemsWithAmounts = formData.items.map(item => ({
-        ...item,
-        amount: item.qty * item.rate
-      }));
-      
-      const payload = {
-        ...formData,
-        items: itemsWithAmounts,
-        from_warehouse: rawMaterials[0]?.warehouse,
-        to_warehouse: formData.to_warehouse
-      };
-      
-      const response = await fetch('/api/stock/stock-entries', {
+      const response = await fetch('/api/stock/delivery-notes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(formData),
       });
       
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.details || 'Failed to create manufacturing entry');
+        throw new Error(errorData.details || 'Failed to create delivery note');
       }
       
       const result = await response.json();
       
       toast({
         title: "Success",
-        description: `Manufacturing entry ${result.data.stockEntry.name} created successfully`
+        description: `Delivery note ${result.data.deliveryNote.name} created successfully`
       });
       
-      router.push(`/stock/stock-entries/${result.data.stockEntry.name}`);
+      router.push(`/stock/delivery-notes/${result.data.deliveryNote.name}`);
     } catch (error: unknown) {
       toast({
         variant: "error",
         title: "Error",
-        description: `Failed to create manufacturing entry: ${(error as Error).message}`
+        description: `Failed to create delivery note: ${(error as Error).message}`
       });
     } finally {
       setLoading(false);
@@ -346,7 +281,7 @@ export default function AddManufacturePage() {
         <div className="flex items-center">
           <Button 
             variant="ghost" 
-            onClick={() => router.push('/stock/stock-entries')}
+            onClick={() => router.push('/stock/delivery-notes')}
             className="mr-4"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -354,10 +289,10 @@ export default function AddManufacturePage() {
           </Button>
           <div>
             <h1 className="text-3xl font-bold flex items-center">
-              <Package className="w-8 h-8 mr-3 text-primary" />
-              New Manufacturing Entry
+              <TruckIcon className="w-8 h-8 mr-3 text-primary" />
+              New Delivery Note
             </h1>
-            <p className="text-muted-foreground">Create a new manufacturing entry</p>
+            <p className="text-muted-foreground">Create a new delivery note</p>
           </div>
         </div>
         <Button 
@@ -366,7 +301,7 @@ export default function AddManufacturePage() {
           className="flex items-center"
         >
           <Save className="w-4 h-4 mr-2" />
-          {loading ? 'Creating...' : 'Create Manufacturing Entry'}
+          {loading ? 'Creating...' : 'Create Delivery Note'}
         </Button>
       </div>
 
@@ -377,28 +312,27 @@ export default function AddManufacturePage() {
           <Card>
             <CardHeader>
               <CardTitle>Basic Information</CardTitle>
-              <CardDescription>Enter the basic details for this manufacturing entry</CardDescription>
+              <CardDescription>Enter the basic details for this delivery note</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="posting_date">Posting Date *</Label>
-                  <Input
-                    id="posting_date"
-                    type="date"
-                    value={formData.posting_date}
-                    onChange={(e) => handleInputChange('posting_date', e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="posting_time">Posting Time</Label>
-                  <Input
-                    id="posting_time"
-                    type="time"
-                    value={formData.posting_time}
-                    onChange={(e) => handleInputChange('posting_time', e.target.value)}
-                  />
+                  <Label htmlFor="customer">Customer *</Label>
+                  <Select
+                    value={formData.customer}
+                    onValueChange={(value) => handleInputChange('customer', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select customer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {options?.customers.map(customer => (
+                        <SelectItem key={customer} value={customer}>
+                          {customer}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label htmlFor="company">Company *</Label>
@@ -418,11 +352,35 @@ export default function AddManufacturePage() {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="to_warehouse">Finished Goods Warehouse *</Label>
+                  <Label htmlFor="posting_date">Posting Date *</Label>
+                  <Input
+                    id="posting_date"
+                    type="date"
+                    value={formData.posting_date}
+                    onChange={(e) => handleInputChange('posting_date', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="posting_time">Posting Time</Label>
+                  <Input
+                    id="posting_time"
+                    type="time"
+                    value={formData.posting_time}
+                    onChange={(e) => handleInputChange('posting_time', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="set_warehouse">Warehouse *</Label>
                   <Select
-                    value={formData.to_warehouse}
-                    onValueChange={(value) => handleInputChange('to_warehouse', value)}
+                    value={formData.set_warehouse}
+                    onValueChange={(value) => handleInputChange('set_warehouse', value)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select warehouse" />
@@ -437,124 +395,53 @@ export default function AddManufacturePage() {
                   </Select>
                 </div>
                 <div>
-                  <Label htmlFor="work_order">Work Order (Optional)</Label>
-                  <Input
-                    id="work_order"
-                    value={formData.work_order}
-                    onChange={(e) => handleInputChange('work_order', e.target.value)}
-                    placeholder="Work order reference"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="production_order">Production Order (Optional)</Label>
-                  <Input
-                    id="production_order"
-                    value={formData.production_order}
-                    onChange={(e) => handleInputChange('production_order', e.target.value)}
-                    placeholder="Production order reference"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="batch_no">Batch Number (Optional)</Label>
-                  <Input
-                    id="batch_no"
-                    value={formData.batch_no}
-                    onChange={(e) => handleInputChange('batch_no', e.target.value)}
-                    placeholder="Batch number"
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Finished Goods Section */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Finished Goods</CardTitle>
-              <CardDescription>Select the finished goods to be manufactured</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-3 gap-4">
-                <div className="col-span-2">
-                  <Label htmlFor="finished_goods">Finished Item *</Label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
-                    <Input
-                      id="finished_goods"
-                      placeholder="Search for finished good..."
-                      value={finishedGoodSearchQuery || formData.finished_goods_name}
-                      onChange={(e) => setFinishedGoodSearchQuery(e.target.value)}
-                      className="pl-10"
-                      onFocus={() => setShowFinishedGoodDropdown(true)}
-                    />
-                  </div>
-                  
-                  {showFinishedGoodDropdown && filteredFinishedGoods.length > 0 && (
-                    <div className="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-md max-h-60 overflow-y-auto">
-                      {filteredFinishedGoods.map((item) => (
-                        <div
-                          key={item.item_code}
-                          className="p-3 hover:bg-muted cursor-pointer border-b"
-                          onClick={() => handleFinishedGoodSelect(item)}
-                        >
-                          <div className="flex justify-between">
-                            <div>
-                              <p className="font-medium">{item.item_name}</p>
-                              <p className="text-sm text-muted-foreground">{item.item_code}</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-medium">{item.valuation_rate.toFixed(2)} ETB</p>
-                              <Badge variant="outline" className="text-xs">
-                                {item.stock_uom}
-                              </Badge>
-                            </div>
-                          </div>
-                        </div>
+                  <Label htmlFor="territory">Territory</Label>
+                  <Select
+                    value={formData.territory}
+                    onValueChange={(value) => handleInputChange('territory', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select territory" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {options?.territories.map(territory => (
+                        <SelectItem key={territory} value={territory}>
+                          {territory}
+                        </SelectItem>
                       ))}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <Label htmlFor="finished_qty">Quantity *</Label>
-                  <Input
-                    id="finished_qty"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={formData.finished_qty}
-                    onChange={(e) => handleInputChange('finished_qty', parseFloat(e.target.value))}
-                    required
-                  />
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
-              
-              <Button 
-                onClick={addFinishedGood} 
-                className="w-full"
-                disabled={!formData.finished_goods}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Finished Good to Items
-              </Button>
+
+              <div>
+                <Label htmlFor="sales_order">Sales Order (Optional)</Label>
+                <Input
+                  id="sales_order"
+                  value={formData.sales_order}
+                  onChange={(e) => handleInputChange('sales_order', e.target.value)}
+                  placeholder="Sales order reference"
+                />
+              </div>
             </CardContent>
           </Card>
 
-          {/* Raw Materials Section */}
+          {/* Items */}
           <Card>
             <CardHeader>
-              <CardTitle>Raw Materials</CardTitle>
-              <CardDescription>Add raw materials consumed in manufacturing</CardDescription>
+              <CardTitle>Items</CardTitle>
+              <CardDescription>Add items to this delivery note</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Add Item Form */}
               <div className="border rounded-lg p-4 bg-muted/50">
                 <div className="relative mb-4">
-                  <Label htmlFor="item_search">Search Raw Material *</Label>
+                  <Label htmlFor="item_search">Search Item *</Label>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={20} />
                     <Input
                       id="item_search"
-                      placeholder="Search for raw material..."
+                      placeholder="Search for an item..."
                       value={itemSearchQuery}
                       onChange={(e) => setItemSearchQuery(e.target.value)}
                       className="pl-10"
@@ -568,25 +455,7 @@ export default function AddManufacturePage() {
                         <div
                           key={item.item_code}
                           className="p-3 hover:bg-muted cursor-pointer border-b"
-                          onClick={() => {
-                            const newItem = {
-                              item_code: item.item_code,
-                              item_name: item.item_name,
-                              qty: 1,
-                              uom: item.stock_uom,
-                              rate: item.valuation_rate,
-                              is_finished_item: false,
-                              amount: item.valuation_rate
-                            };
-                            
-                            setFormData(prev => ({
-                              ...prev,
-                              items: [...prev.items, newItem]
-                            }));
-                            
-                            setItemSearchQuery("");
-                            setShowItemDropdown(false);
-                          }}
+                          onClick={() => handleItemSelect(item)}
                         >
                           <div className="flex justify-between">
                             <div>
@@ -606,9 +475,9 @@ export default function AddManufacturePage() {
                   )}
                 </div>
                 
-                <Button onClick={addRawMaterial} className="w-full">
+                <Button onClick={addItem} className="w-full">
                   <Plus className="w-4 h-4 mr-2" />
-                  Add Custom Raw Material
+                  Add Custom Item
                 </Button>
               </div>
 
@@ -619,7 +488,6 @@ export default function AddManufacturePage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Item</TableHead>
-                        <TableHead>Type</TableHead>
                         <TableHead>Quantity</TableHead>
                         <TableHead>UOM</TableHead>
                         <TableHead>Rate</TableHead>
@@ -630,17 +498,12 @@ export default function AddManufacturePage() {
                     </TableHeader>
                     <TableBody>
                       {formData.items.map((item, index) => (
-                        <TableRow key={index} className={item.is_finished_item ? "bg-green-50" : ""}>
+                        <TableRow key={index}>
                           <TableCell>
                             <div>
                               <p className="font-medium">{item.item_name}</p>
                               <p className="text-sm text-muted-foreground">{item.item_code}</p>
                             </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={item.is_finished_item ? "default" : "secondary"}>
-                              {item.is_finished_item ? "Finished Good" : "Raw Material"}
-                            </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center space-x-2">
@@ -688,14 +551,14 @@ export default function AddManufacturePage() {
                               className="w-24"
                             />
                           </TableCell>
-                          <TableCell className="font-medium">{(item.qty * item.rate).toFixed(2)}</TableCell>
+                          <TableCell className="font-medium">{item.amount.toFixed(2)}</TableCell>
                           <TableCell>
                             <Select
-                              value={item.warehouse || ''}
+                              value={item.warehouse}
                               onValueChange={(value) => updateItem(index, 'warehouse', value)}
                             >
                               <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Select warehouse" />
+                                <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
                                 {options?.warehouses.map(warehouse => (
@@ -760,25 +623,19 @@ export default function AddManufacturePage() {
                     <span>{formData.items.length}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Raw Materials:</span>
-                    <span>{formData.items.filter(item => !item.is_finished_item).length}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Finished Goods:</span>
-                    <span>{formData.items.filter(item => item.is_finished_item).length}</span>
+                    <span>Total Quantity:</span>
+                    <span>{formData.items.reduce((sum, item) => sum + item.qty, 0)}</span>
                   </div>
                 </div>
               </div>
 
               <Button 
                 onClick={handleSubmit} 
-                disabled={loading || !formData.company || !formData.to_warehouse || 
-                  formData.items.filter(item => !item.is_finished_item).length === 0 || 
-                  formData.items.filter(item => item.is_finished_item).length === 0}
+                disabled={loading || !formData.customer || !formData.set_warehouse || formData.items.length === 0}
                 className="w-full"
               >
                 <Save className="w-4 h-4 mr-2" />
-                {loading ? 'Creating...' : 'Create Manufacturing Entry'}
+                {loading ? 'Creating...' : 'Create Delivery Note'}
               </Button>
             </CardContent>
           </Card>

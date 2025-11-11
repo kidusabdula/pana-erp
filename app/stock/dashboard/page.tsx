@@ -118,9 +118,9 @@ export default function StockDashboard() {
 
       // Fetch all data in parallel
       const [summaryRes, balanceRes, ledgerRes] = await Promise.all([
-        fetch('/api/stock-summary'),
-        fetch(`/api/stock-balance?${params}`),
-        fetch(`/api/stock-ledger?${params}&limit=10`)
+        fetch('/api/stock/stock-summary'),
+        fetch(`/api/stock/stock-balance?${params}`),
+        fetch(`/api/stock/stock-ledger?${params}&limit=10`)
       ]);
 
       if (!summaryRes.ok || !balanceRes.ok || !ledgerRes.ok) {

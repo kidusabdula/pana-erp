@@ -1,64 +1,30 @@
 // hooks/useDetailActions.ts
 import { useState } from "react";
-import { shareData, printElement, printToPDF, downloadData } from "@/lib/detail-actions-utils";
+import { printPDF, downloadData } from "@/lib/detail-actions-utils";
 import { ExportableItem } from "@/lib/export-utils";
 import { toast } from "sonner";
 
 export function useDetailActions() {
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleShare = async (
-    title: string,
-    text: string,
-    url?: string
-  ) => {
-    setIsProcessing(true);
-    try {
-      await shareData(title, text, url);
-      toast.success("Shared successfully");
-    } catch (error) {
-      console.error("Share failed:", error);
-      toast.error("Failed to share");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handlePrint = (elementId?: string) => {
-    setIsProcessing(true);
-    try {
-      if (elementId) {
-        printElement(elementId);
-      } else {
-        window.print();
-      }
-      toast.info("Print dialog opened");
-    } catch (error) {
-      console.error("Print failed:", error);
-      toast.error("Failed to open print dialog");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handlePrintPDF = async (
+  const handlePrint = async (
     data: ExportableItem[],
     filename: string,
     title: string,
     headers?: { [key: string]: string }
   ) => {
     if (data.length === 0) {
-      toast.warning("No data available for PDF generation");
+      toast.warning("No data available for printing");
       return;
     }
 
     setIsProcessing(true);
     try {
-      await printToPDF(data, filename, title, headers);
-      toast.success("PDF generated successfully");
+      await printPDF(data, filename, title, headers);
+      toast.success("Print dialog opened");
     } catch (error) {
-      console.error("PDF generation failed:", error);
-      toast.error("Failed to generate PDF");
+      console.error("Print failed:", error);
+      toast.error("Failed to open print dialog");
     } finally {
       setIsProcessing(false);
     }
@@ -89,9 +55,7 @@ export function useDetailActions() {
   };
 
   return {
-    handleShare,
     handlePrint,
-    handlePrintPDF,
     handleDownload,
     isProcessing,
   };

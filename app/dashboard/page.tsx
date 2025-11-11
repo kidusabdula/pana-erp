@@ -139,7 +139,12 @@ interface DashboardFilters {
   date_range: string;
 }
 
-export default function DashboardPage() {
+interface DashboardPageProps {
+  dateFrom: string;
+  dateTo: string;
+}
+
+export default function DashboardPage({ dateFrom, dateTo }: DashboardPageProps) {
   const { push: toast } = useToast();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -157,10 +162,8 @@ export default function DashboardPage() {
   const [filters, setFilters] = useState<DashboardFilters>({
     company: "Ma Beignet (Demo)",
     warehouse: "Stores - MB",
-    date_from: new Date(new Date().setDate(new Date().getDate() - 30))
-      .toISOString()
-      .split("T")[0],
-    date_to: new Date().toISOString().split("T")[0],
+    date_from: dateFrom,
+    date_to: dateTo,
     date_range: "this_month",
   });
   const [activeTab, setActiveTab] = useState<"overview" | "transactions" | "analytics">("overview");
