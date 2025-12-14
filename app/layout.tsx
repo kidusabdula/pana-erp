@@ -1,11 +1,22 @@
 // app/layout.tsx
-// Pana ERP v1.2 - Root Layout
+// Pana ERP v1.3 - Root Layout with next/font
 import type { Metadata } from "next";
+import { Manrope } from "next/font/google";
 import LayoutClient from "./LayoutClient";
+import "./globals.css";
+
+// Premium font loading with next/font (optimized, no layout shift)
+// Plus Jakarta Sans - Modern, Clean, Premium feel (used by Vercel, Linear)
+const jakarta = Manrope({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
+  variable: "--font-jakarta",
+});
 
 export const metadata: Metadata = {
   title: "Pana ERP",
-  description: "Enterprise Resource Planning",
+  description: "Enterprise Resource Planning - Premium Business Management",
 };
 
 export default function RootLayout({
@@ -14,21 +25,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        {/* Manrope Font - Premium, Geometric, Modern */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body className="m-0 p-0 overflow-x-hidden min-h-screen bg-background font-sans">
+    <html lang="en" className={jakarta.variable}>
+      <body
+        className={`${jakarta.className} m-0 p-0 overflow-x-hidden min-h-screen bg-background font-sans`}
+      >
         <LayoutClient>{children}</LayoutClient>
       </body>
     </html>

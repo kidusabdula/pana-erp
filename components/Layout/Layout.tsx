@@ -458,20 +458,41 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <Menu className="h-5 w-5" />
           </Button>
 
-          {/* Breadcrumbs */}
+          {/* Breadcrumbs - Functional Navigation */}
           <div className="hidden lg:flex">
             <div className="flex items-center gap-2 px-4 py-2 bg-card/80 backdrop-blur-sm rounded-full shadow-sm border border-white/30">
-              <span className="text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer">
-                Pana
-              </span>
-              <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
-              <span className="text-sm font-semibold text-foreground capitalize">
-                {pathname
-                  .split("/")
-                  .filter(Boolean)
-                  .slice(-1)[0]
-                  ?.replace(/-/g, " ") || "Dashboard"}
-              </span>
+              <Link
+                href="/dashboard"
+                className="text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer font-medium"
+              >
+                Home
+              </Link>
+              {pathname
+                .split("/")
+                .filter(Boolean)
+                .map((segment, index, array) => {
+                  const href = "/" + array.slice(0, index + 1).join("/");
+                  const isLast = index === array.length - 1;
+                  const label = segment.replace(/-/g, " ");
+
+                  return (
+                    <div key={segment} className="flex items-center gap-2">
+                      <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+                      {isLast ? (
+                        <span className="text-sm font-bold text-foreground capitalize">
+                          {decodeURIComponent(label)}
+                        </span>
+                      ) : (
+                        <Link
+                          href={href}
+                          className="text-sm text-muted-foreground hover:text-primary transition-colors cursor-pointer capitalize font-medium"
+                        >
+                          {decodeURIComponent(label)}
+                        </Link>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           </div>
 

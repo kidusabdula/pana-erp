@@ -1,3 +1,10 @@
+// types/item.ts
+// Pana ERP v1.3 - Item Type Definitions
+
+/**
+ * Item - Frappe API response format
+ * Uses numbers (0/1) for boolean fields as returned by Frappe
+ */
 export interface Item {
   name: string;
   item_code: string;
@@ -10,9 +17,9 @@ export interface Item {
   brand?: string;
   disabled?: number;
   description?: string;
-  qty: number;
+  qty?: number;
   uom?: string;
-  basic_rate: number;
+  basic_rate?: number;
   warehouse?: string;
   // Standard Frappe fields
   owner?: string;
@@ -22,7 +29,9 @@ export interface Item {
   docstatus?: 0 | 1 | 2;
 }
 
-// For items with stock information (this would require a separate API call)
+/**
+ * Item with computed stock information
+ */
 export interface ItemWithStock extends Item {
   actual_qty?: number;
   reserved_qty?: number;
@@ -30,7 +39,9 @@ export interface ItemWithStock extends Item {
   projected_qty?: number;
 }
 
-// For creating a new item
+/**
+ * Item Create/Update Request - Frappe API format
+ */
 export interface ItemCreateRequest {
   item_code: string;
   item_name: string;
@@ -40,15 +51,30 @@ export interface ItemCreateRequest {
   is_fixed_asset?: number;
   description?: string;
   brand?: string;
+  disabled?: number;
 }
 
-// For updating an existing item
+/**
+ * Item Update Request - Partial create request with name
+ */
 export interface ItemUpdateRequest extends Partial<ItemCreateRequest> {
-  name: string;
+  name?: string;
 }
 
-// For dropdown options
+/**
+ * Item Options - Dropdown options from API
+ */
 export interface ItemOptions {
   item_groups: string[];
-  uoms: string[];
+  stock_uoms: string[];
+}
+
+/**
+ * Item Filters for list queries
+ */
+export interface ItemFilters {
+  name?: string;
+  group?: string;
+  status?: string;
+  id?: string;
 }

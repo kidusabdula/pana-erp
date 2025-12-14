@@ -1,10 +1,9 @@
 // app/stock/item/page.tsx
-// Pana ERP v1.3 - Borderless "Air" List
+// Pana ERP v1.3 - Items List Page (Production-Ready Template)
 "use client";
 
 import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,15 +12,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import {
-  Plus,
-  Search,
-  MoreHorizontal,
-  Edit2,
-  Trash2,
-  Eye,
-  Filter,
-} from "lucide-react";
+import { Plus, MoreHorizontal, Edit2, Trash2, Eye, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   useItemsQuery,
@@ -30,21 +21,22 @@ import {
 } from "@/hooks/data/useItemsQuery";
 import { Item } from "@/types/item";
 import { cn } from "@/lib/utils";
+import { ListToolbar } from "@/components/ui/list-toolbar";
+import { useExport } from "@/hooks/useExport";
 
-// Custom "Air" Row Component
-function ItemRow({
-  item,
-  index,
-  onView,
-  onEdit,
-  onDelete,
-}: {
+// ============================================================================
+// Item Row Component
+// ============================================================================
+
+interface ItemRowProps {
   item: Item;
   index: number;
   onView: () => void;
   onEdit: () => void;
   onDelete: () => void;
-}) {
+}
+
+function ItemRow({ item, index, onView, onEdit, onDelete }: ItemRowProps) {
   return (
     <div
       className="group relative flex items-center justify-between p-4 mb-2 bg-card hover:bg-white hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5 transition-all duration-300 rounded-2xl cursor-pointer animate-slide-up"
@@ -74,7 +66,7 @@ function ItemRow({
         </div>
         <div className="flex flex-col items-end w-20">
           <span className="text-[10px] uppercase font-semibold text-muted-foreground/50">
-            Details
+            UOM
           </span>
           <span className="font-medium text-foreground">{item.stock_uom}</span>
         </div>
@@ -129,23 +121,117 @@ function ItemRow({
   );
 }
 
-export default function ItemPage() {
+// ============================================================================
+// Empty State Component
+// ============================================================================
+
+function EmptyState({ hasFilters }: { hasFilters: boolean }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 text-center animate-scale-in">
+      <div className="h-16 w-16 bg-secondary rounded-full flex items-center justify-center mb-4">
+        <Search className="h-6 w-6 text-muted-foreground" />
+      </div>
+      <h3 className="font-semibold text-lg">No Items Found</h3>
+      <p className="text-muted-foreground">
+        {hasFilters
+          ? "Try adjusting your search or filters."
+          : "Get started by creating your first item."}
+      </p>
+    </div>
+  );
+}
+
+// ============================================================================
+// Loading State Component
+// ============================================================================
+
+function LoadingState() {
+  return (
+    <div className="space-y-4">
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="h-20 bg-card/40 rounded-2xl animate-pulse" />
+      ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// Main Page Component
+// ============================================================================
+
+export default function ItemsListPage() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+
   const { data: itemsData, isLoading } = useItemsQuery();
+  const { data: optionsData } = useItemOptionsQuery();
   const deleteMutation = useDeleteItemMutation();
+  const { exportData, isExporting } = useExport();
 
   const items = itemsData?.data?.items || [];
+  const itemGroups = optionsData?.data?.item_groups || [];
 
+  // Filter items based on search and filters
   const filteredItems = useMemo(() => {
-    if (!searchQuery) return items;
-    const q = searchQuery.toLowerCase();
-    return items.filter(
-      (i) =>
-        i.item_name.toLowerCase().includes(q) ||
-        i.item_code.toLowerCase().includes(q)
-    );
-  }, [items, searchQuery]);
+    let result = items;
+
+    // Search filter
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (i) =>
+          i.item_name.toLowerCase().includes(q) ||
+          i.item_code.toLowerCase().includes(q)
+      );
+    }
+
+    // Group filter
+    if (groupFilter !== "all") {
+      result = result.filter((i) => i.item_group === groupFilter);
+    }
+
+    // Status filter
+    if (statusFilter !== "all") {
+      if (statusFilter === "active") {
+        result = result.filter((i) => !i.disabled);
+      } else if (statusFilter === "inactive") {
+        result = result.filter((i) => i.disabled);
+      }
+    }
+
+    return result;
+  }, [items, searchQuery, groupFilter, statusFilter]);
+
+  // Handle export
+  const handleExport = async (format: "csv" | "pdf") => {
+    const exportItems = filteredItems.map((item) => ({
+      item_code: item.item_code,
+      item_name: item.item_name,
+      item_group: item.item_group,
+      stock_uom: item.stock_uom,
+      status: item.disabled ? "Inactive" : "Active",
+    }));
+
+    await exportData(exportItems, "items", "Inventory Items", format, {
+      item_code: "Item Code",
+      item_name: "Item Name",
+      item_group: "Group",
+      stock_uom: "UOM",
+      status: "Status",
+    });
+  };
+
+  // Handle delete
+  const handleDelete = (item: Item) => {
+    if (confirm(`Are you sure you want to delete "${item.item_name}"?`)) {
+      deleteMutation.mutate(item.name);
+    }
+  };
+
+  const hasFilters =
+    Boolean(searchQuery) || groupFilter !== "all" || statusFilter !== "all";
 
   return (
     <div className="space-y-6">
@@ -165,55 +251,44 @@ export default function ItemPage() {
         </Button>
       </div>
 
-      {/* Floating Toolbar */}
-      <div className="sticky top-2 z-10 flex items-center gap-2 p-1.5 bg-white/60 backdrop-blur-md rounded-full border border-white/20 shadow-sm animate-scale-in delay-100 max-w-2xl mx-auto sm:mx-0">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <input
-            placeholder="Search items..."
-            className="w-full h-9 pl-10 pr-4 bg-transparent border-none outline-none text-sm placeholder:text-muted-foreground/70"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <div className="h-4 w-[1px] bg-border/50" />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="rounded-full text-muted-foreground hover:text-foreground"
-        >
-          <Filter className="h-4 w-4 mr-2" /> Filter
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="rounded-full text-muted-foreground hover:text-foreground"
-        >
-          Export
-        </Button>
-      </div>
+      {/* Toolbar */}
+      <ListToolbar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="Search items..."
+        onExport={handleExport}
+        isExporting={isExporting}
+        filters={[
+          {
+            key: "group",
+            label: "Item Group",
+            value: groupFilter,
+            onChange: setGroupFilter,
+            options: [
+              { label: "All Groups", value: "all" },
+              ...itemGroups.map((g) => ({ label: g, value: g })),
+            ],
+          },
+          {
+            key: "status",
+            label: "Status",
+            value: statusFilter,
+            onChange: setStatusFilter,
+            options: [
+              { label: "All", value: "all" },
+              { label: "Active", value: "active" },
+              { label: "Inactive", value: "inactive" },
+            ],
+          },
+        ]}
+      />
 
       {/* Items List */}
       <div className="min-h-[400px]">
         {isLoading ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="h-20 bg-card/40 rounded-2xl animate-pulse"
-              />
-            ))}
-          </div>
+          <LoadingState />
         ) : filteredItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center animate-scale-in">
-            <div className="h-16 w-16 bg-secondary rounded-full flex items-center justify-center mb-4">
-              <Search className="h-6 w-6 text-muted-foreground" />
-            </div>
-            <h3 className="font-semibold text-lg">No Items Found</h3>
-            <p className="text-muted-foreground">
-              Try adjusting your search filters.
-            </p>
-          </div>
+          <EmptyState hasFilters={hasFilters} />
         ) : (
           <div className="pb-10">
             {filteredItems.map((item, idx) => (
@@ -231,9 +306,7 @@ export default function ItemPage() {
                     `/stock/item/${encodeURIComponent(item.item_name)}/edit`
                   )
                 }
-                onDelete={() => {
-                  if (confirm("Delete?")) deleteMutation.mutate(item.name);
-                }}
+                onDelete={() => handleDelete(item)}
               />
             ))}
           </div>

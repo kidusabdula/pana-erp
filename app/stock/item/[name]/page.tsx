@@ -1,5 +1,5 @@
 // app/stock/item/[name]/page.tsx
-// Pana ERP v1.3 - Airy Detail Board
+// Pana ERP v1.3 - Item Detail Page (Production-Ready Template)
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
@@ -9,16 +9,15 @@ import {
 } from "@/hooks/data/useItemsQuery";
 import { Button } from "@/components/ui/button";
 import {
-  ArrowLeft,
   Edit2,
   Trash2,
   Printer,
-  Download,
   Clock,
   Package,
   MoreVertical,
   Activity,
   Layers,
+  Download,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -26,61 +25,32 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
+import { PageHeader } from "@/components/ui/page-header";
+import { InfoCard, DataPoint, StatCard } from "@/components/ui/info-card";
+import { useExport } from "@/hooks/useExport";
 import { cn } from "@/lib/utils";
 
-function InfoCard({
-  title,
-  children,
-  className,
-  delay = 0,
-}: {
-  title: React.ReactNode;
-  children: React.ReactNode;
-  className?: string;
-  delay?: number;
-}) {
+// ============================================================================
+// Loading Skeleton
+// ============================================================================
+
+function LoadingSkeleton() {
   return (
-    <div
-      className={cn(
-        "bg-card rounded-[2rem] p-8 shadow-sm hover:shadow-xl hover:shadow-primary/5 transition-all duration-500 animate-slide-up",
-        className
-      )}
-      style={{ animationDelay: `${delay}ms` }}
-    >
-      <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground/70 mb-6 flex items-center gap-2">
-        {title}
-      </h3>
-      {children}
+    <div className="max-w-6xl mx-auto p-4 space-y-8 animate-pulse">
+      <div className="h-20 bg-secondary/50 rounded-3xl" />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 h-96 bg-secondary/30 rounded-[2rem]" />
+        <div className="h-64 bg-secondary/20 rounded-[2rem]" />
+      </div>
     </div>
   );
 }
 
-function DataPoint({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-xs font-semibold text-muted-foreground">
-        {label}
-      </span>
-      <span
-        className={cn(
-          "text-base font-medium text-foreground",
-          mono && "font-mono tracking-tight"
-        )}
-      >
-        {value || "—"}
-      </span>
-    </div>
-  );
-}
+// ============================================================================
+// Main Page Component
+// ============================================================================
 
 export default function ItemDetailPage() {
   const router = useRouter();
@@ -89,90 +59,127 @@ export default function ItemDetailPage() {
 
   const { data: itemData, isLoading } = useItemQuery(itemName);
   const deleteMutation = useDeleteItemMutation();
+  const { exportData, isExporting } = useExport();
 
   const item = itemData?.item;
 
-  if (isLoading || !item) {
-    return (
-      <div className="max-w-5xl mx-auto p-4 space-y-8 animate-pulse">
-        <div className="h-20 bg-secondary/50 rounded-3xl" />
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 h-96 bg-secondary/30 rounded-[2rem]" />
-          <div className="h-64 bg-secondary/20 rounded-[2rem]" />
-        </div>
-      </div>
+  // Handle export
+  const handleExport = async (format: "csv" | "pdf") => {
+    if (!item) return;
+    const exportItem = {
+      item_code: item.item_code,
+      item_name: item.item_name,
+      item_group: item.item_group,
+      stock_uom: item.stock_uom,
+      brand: item.brand || "",
+      description: item.description || "",
+      status: item.disabled ? "Inactive" : "Active",
+      created: item.creation
+        ? new Date(item.creation).toLocaleDateString()
+        : "",
+    };
+    await exportData(
+      [exportItem],
+      `item-${item.item_code}`,
+      `Item: ${item.item_name}`,
+      format,
+      {
+        item_code: "Item Code",
+        item_name: "Item Name",
+        item_group: "Group",
+        stock_uom: "UOM",
+        brand: "Brand",
+        description: "Description",
+        status: "Status",
+        created: "Created",
+      }
     );
+  };
+
+  // Handle delete
+  const handleDelete = async () => {
+    if (confirm(`Are you sure you want to delete "${item?.item_name}"?`)) {
+      try {
+        await deleteMutation.mutateAsync(item?.name || itemName);
+        router.push("/stock/item");
+      } catch (error) {
+        console.error("Failed to delete item:", error);
+      }
+    }
+  };
+
+  if (isLoading || !item) {
+    return <LoadingSkeleton />;
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-10 pb-20">
-      {/* Navbar / Header */}
-      <div className="flex items-center justify-between sticky top-4 z-20 bg-white/80 backdrop-blur-xl p-2 pr-4 rounded-full border border-white/40 shadow-sm animate-slide-up">
-        <div className="flex items-center gap-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="rounded-full h-10 w-10 hover:bg-white"
-            onClick={() => router.push("/stock/item")}
-          >
-            <ArrowLeft className="h-5 w-5 text-muted-foreground" />
-          </Button>
-          <div className="h-8 w-[1px] bg-border/50" />
-          <div className="flex flex-col">
-            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-              Item Details
-            </span>
-            <h1 className="text-lg font-bold leading-none">{item.item_name}</h1>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div
-            className={cn(
-              "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide border",
-              item.disabled
-                ? "bg-destructive/5 text-destructive border-destructive/10"
-                : "bg-emerald-500/5 text-emerald-600 border-emerald-500/10"
-            )}
-          >
-            {item.disabled ? "Inactive" : "Active"}
-          </div>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="rounded-full hover:bg-white"
-              >
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="rounded-2xl border-none shadow-xl bg-white/90 backdrop-blur-xl p-2"
+    <div className="max-w-6xl mx-auto space-y-8 pb-20">
+      {/* Header */}
+      <PageHeader
+        backUrl="/stock/item"
+        label="Item Details"
+        title={item.item_name}
+        status={{
+          label: item.disabled ? "Inactive" : "Active",
+          variant: item.disabled ? "destructive" : "success",
+        }}
+      >
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full hover:bg-white"
             >
-              <DropdownMenuItem
-                className="rounded-xl"
-                onClick={() =>
-                  router.push(
-                    `/stock/item/${encodeURIComponent(itemName)}/edit`
-                  )
-                }
-              >
-                <Edit2 className="mr-2 h-4 w-4" /> Edit Item
-              </DropdownMenuItem>
-              <DropdownMenuItem className="rounded-xl">
-                <Printer className="mr-2 h-4 w-4" /> Print Label
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-border/50" />
-              <DropdownMenuItem className="rounded-xl text-destructive focus:bg-destructive/10">
-                <Trash2 className="mr-2 h-4 w-4" /> Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="rounded-2xl border-none shadow-xl bg-white/90 backdrop-blur-xl p-2 w-48"
+          >
+            <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
+              Actions
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              className="rounded-xl"
+              onClick={() =>
+                router.push(`/stock/item/${encodeURIComponent(itemName)}/edit`)
+              }
+            >
+              <Edit2 className="mr-2 h-4 w-4" /> Edit Item
+            </DropdownMenuItem>
+            <DropdownMenuItem className="rounded-xl">
+              <Printer className="mr-2 h-4 w-4" /> Print Label
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="bg-border/50" />
+            <DropdownMenuLabel className="text-xs uppercase tracking-wider text-muted-foreground">
+              Export
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              className="rounded-xl"
+              onClick={() => handleExport("csv")}
+              disabled={isExporting}
+            >
+              <Download className="mr-2 h-4 w-4" /> Export CSV
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="rounded-xl"
+              onClick={() => handleExport("pdf")}
+              disabled={isExporting}
+            >
+              <Download className="mr-2 h-4 w-4" /> Export PDF
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="bg-border/50" />
+            <DropdownMenuItem
+              className="rounded-xl text-destructive focus:bg-destructive/10"
+              onClick={handleDelete}
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </PageHeader>
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -214,45 +221,32 @@ export default function ItemDetailPage() {
             }
             delay={200}
           >
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
-              <div className="bg-secondary/30 p-4 rounded-2xl flex flex-col gap-2">
-                <span className="text-xs font-bold text-muted-foreground">
-                  Default UOM
-                </span>
-                <span className="text-xl font-mono text-primary">
-                  {item.stock_uom}
-                </span>
-              </div>
-              <div className="bg-secondary/30 p-4 rounded-2xl flex flex-col gap-2">
-                <span className="text-xs font-bold text-muted-foreground">
-                  Stock Item
-                </span>
-                <span
-                  className={cn(
-                    "text-xl font-bold",
-                    item.is_stock_item
-                      ? "text-emerald-600"
-                      : "text-muted-foreground"
-                  )}
-                >
-                  {item.is_stock_item ? "Yes" : "No"}
-                </span>
-              </div>
-              <div className="bg-secondary/30 p-4 rounded-2xl flex flex-col gap-2">
-                <span className="text-xs font-bold text-muted-foreground">
-                  Fixed Asset
-                </span>
-                <span
-                  className={cn(
-                    "text-xl font-bold",
-                    item.is_fixed_asset
-                      ? "text-emerald-600"
-                      : "text-muted-foreground"
-                  )}
-                >
-                  {item.is_fixed_asset ? "Yes" : "No"}
-                </span>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <StatCard
+                label="Default UOM"
+                value={item.stock_uom}
+                valueClassName="text-primary"
+              />
+              <StatCard
+                label="Stock Item"
+                value={item.is_stock_item ? "Yes" : "No"}
+                valueClassName={cn(
+                  "font-bold",
+                  item.is_stock_item
+                    ? "text-emerald-600"
+                    : "text-muted-foreground"
+                )}
+              />
+              <StatCard
+                label="Fixed Asset"
+                value={item.is_fixed_asset ? "Yes" : "No"}
+                valueClassName={cn(
+                  "font-bold",
+                  item.is_fixed_asset
+                    ? "text-emerald-600"
+                    : "text-muted-foreground"
+                )}
+              />
             </div>
           </InfoCard>
         </div>
@@ -262,22 +256,26 @@ export default function ItemDetailPage() {
           <InfoCard
             title={
               <>
-                <Activity className="h-4 w-4" /> Status
+                <Activity className="h-4 w-4" /> Stock Status
               </>
             }
             delay={300}
-            className="bg-gradient-to-br from-indigo-50/50 to-purple-50/50 border border-white/50"
+            variant="gradient"
+            gradientFrom="from-indigo-50/50"
+            gradientTo="to-purple-50/50"
           >
             <div className="flex flex-col gap-6">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Valuation Rate</span>
-                <span className="font-mono text-lg font-bold">120.00</span>
+                <span className="font-mono text-lg font-bold">
+                  {item.valuation_rate?.toFixed(2) || "0.00"}
+                </span>
               </div>
               <div className="h-[1px] bg-border/50" />
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Current Stock</span>
                 <span className="font-mono text-lg font-bold text-primary">
-                  1,240
+                  {item.qty?.toLocaleString() || "0"}
                 </span>
               </div>
             </div>
@@ -290,21 +288,33 @@ export default function ItemDetailPage() {
               </>
             }
             delay={400}
-            className="bg-transparent border-none shadow-none p-0 hover:shadow-none"
+            variant="transparent"
           >
             <div className="space-y-4 text-sm text-muted-foreground/80">
               <div className="flex justify-between">
                 <span>Created</span>
                 <span className="font-mono">
-                  {new Date(item.creation || "").toLocaleDateString()}
+                  {item.creation
+                    ? new Date(item.creation).toLocaleDateString()
+                    : "—"}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span>Last Modified</span>
                 <span className="font-mono">
-                  {new Date(item.modified || "").toLocaleDateString()}
+                  {item.modified
+                    ? new Date(item.modified).toLocaleDateString()
+                    : "—"}
                 </span>
               </div>
+              {item.owner && (
+                <div className="flex justify-between">
+                  <span>Created By</span>
+                  <span className="font-mono truncate max-w-[120px]">
+                    {item.owner}
+                  </span>
+                </div>
+              )}
             </div>
           </InfoCard>
         </div>
