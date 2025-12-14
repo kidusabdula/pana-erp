@@ -1,363 +1,244 @@
 // app/stock/item/page.tsx
+// Pana ERP v1.3 - Borderless "Air" List
 "use client";
 
 import { useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  Package,
   Plus,
-  RefreshCw,
-  Eye,
-  Edit,
+  Search,
+  MoreHorizontal,
+  Edit2,
   Trash2,
-  Download,
+  Eye,
+  Filter,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useItemsQuery, useDeleteItemMutation } from "@/hooks/data/useItemsQuery";
-import { useItemOptionsQuery } from "@/hooks/data/useItemsQuery";
-import { FilterDropdown } from "@/components/ui/filter-dropdown";
-import { SearchBar } from "@/components/ui/search-bar";
-import { ExportDialog } from "@/components/ui/export-dialog";
-import { toast } from "sonner";
+import {
+  useItemsQuery,
+  useDeleteItemMutation,
+  useItemOptionsQuery,
+} from "@/hooks/data/useItemsQuery";
 import { Item } from "@/types/item";
+import { cn } from "@/lib/utils";
 
-interface Filters {
-  name: string;
-  group: string;
-  status: string;
-  id: string;
+// Custom "Air" Row Component
+function ItemRow({
+  item,
+  index,
+  onView,
+  onEdit,
+  onDelete,
+}: {
+  item: Item;
+  index: number;
+  onView: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className="group relative flex items-center justify-between p-4 mb-2 bg-card hover:bg-white hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-0.5 transition-all duration-300 rounded-2xl cursor-pointer animate-slide-up"
+      style={{ animationDelay: `${index * 50}ms`, transitionDelay: "0ms" }}
+      onClick={onView}
+    >
+      <div className="flex items-center gap-4 min-w-0">
+        <div className="h-10 w-10 rounded-full bg-secondary/50 flex items-center justify-center text-xs font-bold text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary transition-colors">
+          {item.item_name.substring(0, 2).toUpperCase()}
+        </div>
+        <div className="flex flex-col min-w-0">
+          <span className="font-bold text-foreground text-sm truncate">
+            {item.item_name}
+          </span>
+          <span className="text-xs text-muted-foreground font-mono">
+            {item.item_code}
+          </span>
+        </div>
+      </div>
+
+      <div className="hidden sm:flex items-center gap-8 text-sm text-muted-foreground">
+        <div className="flex flex-col items-end w-24">
+          <span className="text-[10px] uppercase font-semibold text-muted-foreground/50">
+            Group
+          </span>
+          <span className="font-medium text-foreground">{item.item_group}</span>
+        </div>
+        <div className="flex flex-col items-end w-20">
+          <span className="text-[10px] uppercase font-semibold text-muted-foreground/50">
+            Details
+          </span>
+          <span className="font-medium text-foreground">{item.stock_uom}</span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 pl-4 border-l border-transparent sm:border-border/40">
+        <div
+          className={cn(
+            "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide",
+            item.disabled
+              ? "bg-destructive/10 text-destructive"
+              : "bg-emerald-500/10 text-emerald-600"
+          )}
+        >
+          {item.disabled ? "Inactive" : "Active"}
+        </div>
+
+        <div onClick={(e) => e.stopPropagation()}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-full hover:bg-secondary"
+              >
+                <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="rounded-xl border-none shadow-xl bg-white/90 backdrop-blur-xl"
+            >
+              <DropdownMenuLabel>Actions</DropdownMenuLabel>
+              <DropdownMenuItem className="rounded-lg" onClick={onView}>
+                <Eye className="mr-2 h-4 w-4" /> View
+              </DropdownMenuItem>
+              <DropdownMenuItem className="rounded-lg" onClick={onEdit}>
+                <Edit2 className="mr-2 h-4 w-4" /> Edit
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="bg-border/50" />
+              <DropdownMenuItem
+                className="rounded-lg text-destructive focus:bg-destructive/10"
+                onClick={onDelete}
+              >
+                <Trash2 className="mr-2 h-4 w-4" /> Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function ItemPage() {
   const router = useRouter();
-  const [filters, setFilters] = useState<Filters>({
-    name: "",
-    group: "all",
-    status: "all",
-    id: "",
-  });
   const [searchQuery, setSearchQuery] = useState("");
-
-  // State for the delete confirmation dialog
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
-
-  // Fetch items with filters
-  const { data: itemsData, isLoading, error, refetch } = useItemsQuery(filters);
-  const { data: optionsData } = useItemOptionsQuery();
+  const { data: itemsData, isLoading } = useItemsQuery();
   const deleteMutation = useDeleteItemMutation();
 
   const items = itemsData?.data?.items || [];
-  const itemGroups = optionsData?.data?.item_groups || [];
 
-  // Filter items based on search query
   const filteredItems = useMemo(() => {
     if (!searchQuery) return items;
-    
-    const query = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase();
     return items.filter(
-      (item) =>
-        item.item_name.toLowerCase().includes(query) ||
-        item.item_code.toLowerCase().includes(query) ||
-        (item.brand && item.brand.toLowerCase().includes(query))
+      (i) =>
+        i.item_name.toLowerCase().includes(q) ||
+        i.item_code.toLowerCase().includes(q)
     );
   }, [items, searchQuery]);
 
-  // Prepare data for export with proper headers
-  const exportData = useMemo(() => {
-    return filteredItems.map(item => ({
-      'Item Code': item.item_code,
-      'Item Name': item.item_name,
-      'Item Group': item.item_group,
-      'UOM': item.stock_uom,
-      'Brand': item.brand || '',
-      'Status': item.disabled ? 'Disabled' : 'Enabled',
-      'Is Stock Item': item.is_stock_item ? 'Yes' : 'No',
-      'Is Fixed Asset': item.is_fixed_asset ? 'Yes' : 'No',
-      'Last Modified': item.modified ? new Date(item.modified).toLocaleString() : ''
-    }));
-  }, [filteredItems]);
-
-  const handleFilterChange = (newFilters: Filters) => {
-    setFilters(newFilters);
-  };
-
-  const handleRefresh = () => {
-    refetch();
-  };
-
-  // Function to open the delete dialog
-  const handleDeleteClick = (item: Item) => {
-    setItemToDelete(item);
-    setIsDeleteDialogOpen(true);
-  };
-
-  // Function to confirm the deletion
-  const handleConfirmDelete = () => {
-    if (itemToDelete) {
-      deleteMutation.mutate(itemToDelete.name, {
-        onSuccess: () => {
-          setIsDeleteDialogOpen(false);
-          setItemToDelete(null);
-          toast.success("Item deleted successfully");
-        },
-        onError: (error) => {
-          toast.error(`Failed to delete item: ${error.message}`);
-        }
-      });
-    }
-  };
-
-  // Function to cancel the deletion
-  const handleCancelDelete = () => {
-    setIsDeleteDialogOpen(false);
-    setItemToDelete(null);
-  };
-
-  const getStatusColor = (disabled?: number) => {
-    return disabled ? "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400" : "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
-  };
-
-  const getStatusText = (disabled?: number) => {
-    return disabled ? "Disabled" : "Enabled";
-  };
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-background p-8">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-2">Error loading items</h2>
-          <p className="text-muted-foreground mb-4">
-            {error.message || "Something went wrong"}
-          </p>
-          <Button onClick={handleRefresh}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Try Again
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-background p-8">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-slide-up">
         <div>
-          <h1 className="text-3xl font-bold flex items-center">
-            <Package className="w-8 h-8 mr-3 text-primary" />
-            Items
-          </h1>
-          <p className="text-muted-foreground">
-            Manage inventory items and stock
+          <h1 className="text-3xl font-extrabold tracking-tight">Inventory</h1>
+          <p className="text-muted-foreground mt-1">
+            Manage your catalogue and stock.
           </p>
         </div>
-        <div className="flex space-x-2">
-          <Button
-            onClick={handleRefresh}
-            variant="outline"
-            disabled={isLoading}
-            className="flex items-center"
-          >
-            <RefreshCw
-              className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </Button>
-          <ExportDialog
-            data={exportData}
-            filename="items"
-            title="Inventory Items"
-          >
-            <Button variant="outline">
-              <Download className="w-4 h-4 mr-2" />
-              Export
-            </Button>
-          </ExportDialog>
-          <Button onClick={() => router.push("/stock/item/new")}>
-            <Plus className="w-4 h-4 mr-2" />
-            New Item
-          </Button>
+        <Button
+          onClick={() => router.push("/stock/item/new")}
+          className="rounded-full px-6 shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-0.5 transition-all"
+        >
+          <Plus className="h-4 w-4 mr-2" /> New Item
+        </Button>
+      </div>
+
+      {/* Floating Toolbar */}
+      <div className="sticky top-2 z-10 flex items-center gap-2 p-1.5 bg-white/60 backdrop-blur-md rounded-full border border-white/20 shadow-sm animate-scale-in delay-100 max-w-2xl mx-auto sm:mx-0">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            placeholder="Search items..."
+            className="w-full h-9 pl-10 pr-4 bg-transparent border-none outline-none text-sm placeholder:text-muted-foreground/70"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </div>
+        <div className="h-4 w-[1px] bg-border/50" />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="rounded-full text-muted-foreground hover:text-foreground"
+        >
+          <Filter className="h-4 w-4 mr-2" /> Filter
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="rounded-full text-muted-foreground hover:text-foreground"
+        >
+          Export
+        </Button>
       </div>
 
-      {/* Filters and Search */}
-      <div className="flex items-center gap-4 mb-6">
-        <FilterDropdown
-          filters={filters}
-          onFiltersChange={handleFilterChange}
-          itemGroups={itemGroups}
-          onApply={() => refetch()}
-          onClear={() => {
-            setFilters({
-              name: "",
-              group: "all",
-              status: "all",
-              id: "",
-            });
-          }}
-        />
-        <SearchBar
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Search items..."
-        />
-      </div>
-
-      {/* Items Table */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Inventory Items</CardTitle>
-              <CardDescription>
-                {filteredItems.length} item{filteredItems.length !== 1 ? "s" : ""} found
-              </CardDescription>
-            </div>
+      {/* Items List */}
+      <div className="min-h-[400px]">
+        {isLoading ? (
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="h-20 bg-card/40 rounded-2xl animate-pulse"
+              />
+            ))}
           </div>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-2">
-              {[...Array(5)].map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
+        ) : filteredItems.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center animate-scale-in">
+            <div className="h-16 w-16 bg-secondary rounded-full flex items-center justify-center mb-4">
+              <Search className="h-6 w-6 text-muted-foreground" />
             </div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item Code</TableHead>
-                    <TableHead>Item Name</TableHead>
-                    <TableHead>Item Group</TableHead>
-                    <TableHead>UOM</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredItems.map((item) => (
-                    <TableRow
-                      key={item.name}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => {
-                        const encodedName = encodeURIComponent(item.item_name);
-                        router.push(`/stock/item/${encodedName}`);
-                      }}
-                    >
-                      <TableCell className="font-mono text-sm">
-                        {item.item_code}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {item.item_name}
-                      </TableCell>
-                      <TableCell>{item.item_group}</TableCell>
-                      <TableCell>{item.stock_uom}</TableCell>
-                      <TableCell>
-                        <Badge className={getStatusColor(item.disabled)}>
-                          {getStatusText(item.disabled)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <div className="flex justify-end space-x-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              const encodedName = encodeURIComponent(item.item_name);
-                              router.push(`/stock/item/${encodedName}`);
-                            }}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              const encodedName = encodeURIComponent(item.item_name);
-                              router.push(`/stock/item/${encodedName}/edit`);
-                            }}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDeleteClick(item)}
-                            disabled={deleteMutation.isPending}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-
-          {filteredItems.length === 0 && !isLoading && (
-            <div className="text-center py-8 text-muted-foreground">
-              <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>No items found</p>
-              <Button
-                className="mt-4"
-                onClick={() => router.push("/stock/item/new")}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add New Item
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the item
-              <span className="font-semibold"> "{itemToDelete?.item_name}" </span>
-              and remove its data from our servers.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleCancelDelete}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmDelete}
-              disabled={deleteMutation.isPending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deleteMutation.isPending ? "Deleting..." : "Continue"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            <h3 className="font-semibold text-lg">No Items Found</h3>
+            <p className="text-muted-foreground">
+              Try adjusting your search filters.
+            </p>
+          </div>
+        ) : (
+          <div className="pb-10">
+            {filteredItems.map((item, idx) => (
+              <ItemRow
+                key={item.name}
+                item={item}
+                index={idx}
+                onView={() =>
+                  router.push(
+                    `/stock/item/${encodeURIComponent(item.item_name)}`
+                  )
+                }
+                onEdit={() =>
+                  router.push(
+                    `/stock/item/${encodeURIComponent(item.item_name)}/edit`
+                  )
+                }
+                onDelete={() => {
+                  if (confirm("Delete?")) deleteMutation.mutate(item.name);
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

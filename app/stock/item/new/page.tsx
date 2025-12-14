@@ -1,10 +1,18 @@
+// app/stock/item/new/page.tsx
+// Pana ERP v1.2 - Premium Add Item Page Template
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -19,43 +27,152 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription,
 } from "@/components/ui/form";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Package, Save, ArrowLeft, Calculator, Check, Search } from "lucide-react";
+import {
+  Package,
+  Save,
+  ArrowLeft,
+  Check,
+  Search,
+  Sparkles,
+  Box,
+  Tag,
+  Loader2,
+} from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { itemCreateSchema, ItemCreateFormValues } from "@/hooks/domain/useItemValidation";
-import { useCreateItemMutation, useItemOptionsQuery } from "@/hooks/data/useItemsQuery";
+import {
+  itemCreateSchema,
+  ItemCreateFormValues,
+} from "@/hooks/domain/useItemValidation";
+import {
+  useCreateItemMutation,
+  useItemOptionsQuery,
+} from "@/hooks/data/useItemsQuery";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+// Searchable Select Component
+function SearchableSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+  searchPlaceholder,
+  emptyMessage,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+  searchPlaceholder: string;
+  emptyMessage: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filteredOptions = options.filter((option) =>
+    option.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={cn(
+            "w-full justify-between text-left font-normal h-10",
+            !value && "text-muted-foreground"
+          )}
+        >
+          {value || placeholder}
+          <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[280px] p-0" align="start">
+        <div className="p-2 border-b border-border">
+          <Input
+            placeholder={searchPlaceholder}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9"
+          />
+        </div>
+        <div className="max-h-60 overflow-auto p-1">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((option) => (
+              <Button
+                key={option}
+                variant="ghost"
+                className="w-full justify-start font-normal h-9"
+                onClick={() => {
+                  onChange(option);
+                  setOpen(false);
+                  setSearch("");
+                }}
+              >
+                <Check
+                  className={cn(
+                    "mr-2 h-4 w-4",
+                    option === value ? "opacity-100" : "opacity-0"
+                  )}
+                />
+                {option}
+              </Button>
+            ))
+          ) : (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              {emptyMessage}
+            </p>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Loading Skeleton for Options
+function FormSkeleton() {
+  return (
+    <div className="p-4 lg:p-6 space-y-6">
+      <div className="flex items-center gap-4">
+        <div className="skeleton h-9 w-9 rounded" />
+        <div className="space-y-2">
+          <div className="skeleton h-6 w-32 rounded" />
+          <div className="skeleton h-4 w-48 rounded" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <div className="skeleton h-96 rounded-xl" />
+        </div>
+        <div className="skeleton h-64 rounded-xl" />
+      </div>
+    </div>
+  );
+}
 
 export default function AddItemPage() {
   const router = useRouter();
   const createMutation = useCreateItemMutation({
     onSuccess: (data) => {
-      // Get the name of the newly created item
       const newItemName = data.data.item.item_name;
-      // Redirect to the detail page
-      router.push(`/stock/item/${newItemName}`);
+      router.push(`/stock/item/${encodeURIComponent(newItemName)}`);
     },
   });
 
-  const { data: optionsData, isLoading: optionsLoading } = useItemOptionsQuery();
+  const { data: optionsData, isLoading: optionsLoading } =
+    useItemOptionsQuery();
 
-  // State to control the open/close state of the Popovers
-  const [itemGroupOpen, setItemGroupOpen] = useState(false);
-  const [stockUomOpen, setStockUomOpen] = useState(false);
-  
-  // Local state for search queries
-  const [itemGroupSearch, setItemGroupSearch] = useState("");
-  const [uomSearch, setUomSearch] = useState("");
-
-  const form = useForm({
+  const form = useForm<ItemCreateFormValues>({
     resolver: zodResolver(itemCreateSchema),
     defaultValues: {
       item_code: "",
@@ -67,32 +184,28 @@ export default function AddItemPage() {
       description: "",
       brand: "",
     },
+    mode: "onChange",
   });
 
   const onSubmit = (data: ItemCreateFormValues) => {
     createMutation.mutate(data);
   };
 
-  const handleBack = () => {
-    router.push("/stock/item");
-  };
-
-  // Generate item code from item name
+  // Auto-generate item code from item name
   const generateItemCode = (name: string) => {
     return name
       .toLowerCase()
       .replace(/\s+/g, "-")
       .replace(/[^a-z0-9-]/g, "")
-      .toUpperCase();
+      .toUpperCase()
+      .slice(0, 20);
   };
 
-  // Auto-generate item code when item name changes
   useEffect(() => {
     const subscription = form.watch((value, { name }) => {
       if (name === "item_name") {
         const itemName = value.item_name;
         const currentCode = form.getValues("item_code");
-
         if (itemName && !currentCode) {
           const generatedCode = generateItemCode(itemName);
           form.setValue("item_code", generatedCode, { shouldValidate: true });
@@ -100,88 +213,78 @@ export default function AddItemPage() {
       }
     });
     return () => subscription.unsubscribe();
-  }, [form.watch, form]);
-
+  }, [form]);
 
   if (optionsLoading) {
-    return (
-      <div className="min-h-screen bg-background p-8 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4">Loading options...</p>
-        </div>
-      </div>
-    );
+    return <FormSkeleton />;
   }
 
   const itemGroups = optionsData?.data?.item_groups || [];
   const uoms = optionsData?.data?.uoms || [];
 
-  // Filter logic based on search query
-  const filteredItemGroups = itemGroups.filter((group) =>
-    group.toLowerCase().includes(itemGroupSearch.toLowerCase())
-  );
-  const filteredUoms = uoms.filter((uom) =>
-    uom.toLowerCase().includes(uomSearch.toLowerCase())
-  );
+  const watchedValues = form.watch();
 
   return (
-    <div className="min-h-screen bg-background p-8">
+    <div className="p-4 lg:p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center">
-          <Button variant="ghost" onClick={handleBack} className="mr-4">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => router.push("/stock/item")}
+          >
+            <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-3xl font-bold flex items-center">
-              <Package className="w-8 h-8 mr-3 text-primary" />
-              New Item
+            <h1 className="text-xl lg:text-2xl font-semibold text-foreground">
+              Add New Item
             </h1>
-            <p className="text-muted-foreground">Create a new inventory item</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Create a new inventory item
+            </p>
           </div>
         </div>
         <Button
           form="item-form"
           type="submit"
-          disabled={createMutation.isPending}
-          className="flex items-center"
+          disabled={createMutation.isPending || !form.formState.isValid}
+          className="w-full sm:w-auto"
         >
-          <Save className="w-4 h-4 mr-2" />
-          {createMutation.isPending ? "Creating..." : "Create Item"}
+          {createMutation.isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Creating...
+            </>
+          ) : (
+            <>
+              <Save className="h-4 w-4 mr-2" />
+              Create Item
+            </>
+          )}
         </Button>
       </div>
 
       <Form {...form}>
         <form id="item-form" onSubmit={form.handleSubmit(onSubmit)}>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left Column - Form */}
+            {/* Main Form */}
             <div className="lg:col-span-2 space-y-6">
               {/* Basic Information */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Basic Information</CardTitle>
-                  <CardDescription>Enter the basic details for this item</CardDescription>
+              <Card className="shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2">
+                    <Box className="h-5 w-5 text-primary" />
+                    <CardTitle className="text-base">
+                      Basic Information
+                    </CardTitle>
+                  </div>
+                  <CardDescription>
+                    Enter the essential details for this item
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="item_code"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Item Code *</FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder="Enter item code (e.g., ITM-001)"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
                       name="item_name"
@@ -190,7 +293,29 @@ export default function AddItemPage() {
                           <FormLabel>Item Name *</FormLabel>
                           <FormControl>
                             <Input
-                              placeholder="Enter item name"
+                              placeholder="e.g., Business Cards"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="item_code"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            Item Code *
+                            <span className="text-xs text-muted-foreground font-normal">
+                              (auto-generated)
+                            </span>
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="e.g., BC-001"
+                              className="font-mono"
                               {...field}
                             />
                           </FormControl>
@@ -200,186 +325,43 @@ export default function AddItemPage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    {/* Custom Dropdown Implementation for Item Group */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <FormField
                       control={form.control}
                       name="item_group"
                       render={({ field }) => (
-                        <FormItem className="flex flex-col">
+                        <FormItem>
                           <FormLabel>Item Group *</FormLabel>
-                          <Popover open={itemGroupOpen} onOpenChange={setItemGroupOpen}>
-                            <PopoverTrigger asChild>
-                              <FormControl>
-                                <Button
-                                  variant="outline"
-                                  role="combobox"
-                                  className={cn(
-                                    "w-full justify-between text-left font-normal",
-                                    !field.value && "text-muted-foreground"
-                                  )}
-                                >
-                                  {field.value
-                                    ? itemGroups.find((group) => group === field.value)
-                                    : "Select item group"}
-                                  <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                              </FormControl>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[200px] p-0" align="start"> {/* *** CHANGE: Set fixed width *** */}
-                              <div className="p-3">
-                                <Input
-                                  placeholder="Search item group..."
-                                  value={itemGroupSearch}
-                                  onChange={(e) => setItemGroupSearch(e.target.value)}
-                                  className="mb-2"
-                                />
-                              </div>
-                              <div className="max-h-60 overflow-auto p-1">
-                                {filteredItemGroups.length > 0 ? (
-                                  filteredItemGroups.map((group) => (
-                                    <Button
-                                      key={group}
-                                      variant="ghost"
-                                      className="w-full justify-start font-normal"
-                                      onClick={() => {
-                                        form.setValue("item_group", group, { shouldValidate: true });
-                                        setItemGroupOpen(false);
-                                        setItemGroupSearch(""); // Clear search on select
-                                      }}
-                                    >
-                                      <Check
-                                        className={cn(
-                                          "mr-2 h-4 w-4",
-                                          group === field.value ? "opacity-100" : "opacity-0"
-                                        )}
-                                      />
-                                      {group}
-                                    </Button>
-                                  ))
-                                ) : (
-                                  <p className="py-6 text-center text-sm text-muted-foreground">No item group found.</p>
-                                )}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
+                          <FormControl>
+                            <SearchableSelect
+                              value={field.value}
+                              onChange={field.onChange}
+                              options={itemGroups}
+                              placeholder="Select group"
+                              searchPlaceholder="Search groups..."
+                              emptyMessage="No groups found"
+                            />
+                          </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    {/* Custom Dropdown Implementation for UOM */}
                     <FormField
                       control={form.control}
                       name="stock_uom"
                       render={({ field }) => (
-                        <FormItem className="flex flex-col">
-                          <FormLabel>Stock Unit of Measure *</FormLabel>
-                          <Popover open={stockUomOpen} onOpenChange={setStockUomOpen}>
-                            <PopoverTrigger asChild>
-                              <FormControl>
-                                <Button
-                                  variant="outline"
-                                  role="combobox"
-                                  className={cn(
-                                    "w-full justify-between text-left font-normal",
-                                    !field.value && "text-muted-foreground"
-                                  )}
-                                >
-                                  {field.value
-                                    ? uoms.find((uom) => uom === field.value)
-                                    : "Select UOM"}
-                                  <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                              </FormControl>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[200px] p-0" align="start"> {/* *** CHANGE: Set fixed width *** */}
-                              <div className="p-3">
-                                <Input
-                                  placeholder="Search UOM..."
-                                  value={uomSearch}
-                                  onChange={(e) => setUomSearch(e.target.value)}
-                                  className="mb-2"
-                                />
-                              </div>
-                              <div className="max-h-60 overflow-auto p-1">
-                                {filteredUoms.length > 0 ? (
-                                  filteredUoms.map((uom) => (
-                                    <Button
-                                      key={uom}
-                                      variant="ghost"
-                                      className="w-full justify-start font-normal"
-                                      onClick={() => {
-                                        form.setValue("stock_uom", uom, { shouldValidate: true });
-                                        setStockUomOpen(false);
-                                        setUomSearch(""); // Clear search on select
-                                      }}
-                                    >
-                                      <Check
-                                        className={cn(
-                                          "mr-2 h-4 w-4",
-                                          uom === field.value ? "opacity-100" : "opacity-0"
-                                        )}
-                                      />
-                                      {uom}
-                                    </Button>
-                                  ))
-                                ) : (
-                                  <p className="py-6 text-center text-sm text-muted-foreground">No UOM found.</p>
-                                )}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="is_stock_item"
-                      render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Maintain Stock</FormLabel>
-                          <Select
-                            onValueChange={(value) => field.onChange(parseInt(value))}
-                            defaultValue={String(field.value)}
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select option" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="1">Yes</SelectItem>
-                              <SelectItem value="0">No</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="is_fixed_asset"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Is Fixed Asset</FormLabel>
-                          <Select
-                            onValueChange={(value) => field.onChange(parseInt(value))}
-                            defaultValue={String(field.value)}
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select option" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="1">Yes</SelectItem>
-                              <SelectItem value="0">No</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <FormLabel>Unit of Measure *</FormLabel>
+                          <FormControl>
+                            <SearchableSelect
+                              value={field.value}
+                              onChange={field.onChange}
+                              options={uoms}
+                              placeholder="Select UOM"
+                              searchPlaceholder="Search UOM..."
+                              emptyMessage="No UOM found"
+                            />
+                          </FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -393,8 +375,14 @@ export default function AddItemPage() {
                       <FormItem>
                         <FormLabel>Brand</FormLabel>
                         <FormControl>
-                          <Input placeholder="Enter brand name" {...field} />
+                          <Input
+                            placeholder="e.g., Pana Promotion"
+                            {...field}
+                          />
                         </FormControl>
+                        <FormDescription>
+                          Optional. Enter the brand or manufacturer name.
+                        </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -407,10 +395,9 @@ export default function AddItemPage() {
                       <FormItem>
                         <FormLabel>Description</FormLabel>
                         <FormControl>
-                          <textarea
-                            placeholder="Enter item description"
-                            className="w-full min-h-[80px] p-2 border rounded-md resize-none"
-                            rows={3}
+                          <Textarea
+                            placeholder="Enter a detailed description of the item..."
+                            className="min-h-[100px] resize-none"
                             {...field}
                           />
                         </FormControl>
@@ -420,64 +407,152 @@ export default function AddItemPage() {
                   />
                 </CardContent>
               </Card>
+
+              {/* Settings */}
+              <Card className="shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-2">
+                    <Tag className="h-5 w-5 text-primary" />
+                    <CardTitle className="text-base">Settings</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Configure how this item is managed in the system
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="is_stock_item"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Maintain Stock</FormLabel>
+                          <Select
+                            onValueChange={(value) =>
+                              field.onChange(parseInt(value))
+                            }
+                            value={String(field.value)}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="1">Yes</SelectItem>
+                              <SelectItem value="0">No</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            Track stock levels for this item
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="is_fixed_asset"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Is Fixed Asset</FormLabel>
+                          <Select
+                            onValueChange={(value) =>
+                              field.onChange(parseInt(value))
+                            }
+                            value={String(field.value)}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="0">No</SelectItem>
+                              <SelectItem value="1">Yes</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            Treat as a fixed asset for accounting
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
-            {/* Right Column - Summary */}
-            <div>
-              {/* Summary Card */}
-              <Card className="sticky top-8">
-                <CardHeader>
-                  <CardTitle className="flex items-center">
-                    <Calculator className="w-5 h-5 mr-2" />
-                    Item Summary
-                  </CardTitle>
+            {/* Sidebar - Summary */}
+            <div className="space-y-6">
+              <Card className="shadow-sm sticky top-6">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    <CardTitle className="text-base">Summary</CardTitle>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span>Item Code:</span>
-                      <span className="font-medium">
-                        {form.watch("item_code") || "-"}
+                  <div className="space-y-3">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Item Name</span>
+                      <span className="font-medium truncate max-w-[140px]">
+                        {watchedValues.item_name || "—"}
                       </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Item Name:</span>
-                      <span className="font-medium">
-                        {form.watch("item_name") || "-"}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Item Code</span>
+                      <span className="font-mono text-xs">
+                        {watchedValues.item_code || "—"}
                       </span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Item Group:</span>
-                      <span>{form.watch("item_group") || "-"}</span>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Group</span>
+                      <span>{watchedValues.item_group || "—"}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>UOM:</span>
-                      <span>{form.watch("stock_uom") || "-"}</span>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">UOM</span>
+                      <span>{watchedValues.stock_uom || "—"}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Maintain Stock:</span>
-                      <span>{form.watch("is_stock_item") ? "Yes" : "No"}</span>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">
+                        Maintain Stock
+                      </span>
+                      <span>{watchedValues.is_stock_item ? "Yes" : "No"}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Fixed Asset:</span>
-                      <span>{form.watch("is_fixed_asset") ? "Yes" : "No"}</span>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Fixed Asset</span>
+                      <span>{watchedValues.is_fixed_asset ? "Yes" : "No"}</span>
                     </div>
                   </div>
 
-                  <div className="pt-4 border-t">
-                    <div className="text-sm text-muted-foreground">
-                      <p>Fill in all required fields marked with (*) to create the item.</p>
-                    </div>
+                  <div className="pt-4 border-t border-border">
+                    <p className="text-xs text-muted-foreground">
+                      Fill in all required fields marked with (*) to create the
+                      item.
+                    </p>
                   </div>
 
                   <Button
                     type="submit"
                     form="item-form"
-                    disabled={createMutation.isPending || !form.formState.isValid}
+                    disabled={
+                      createMutation.isPending || !form.formState.isValid
+                    }
                     className="w-full"
                   >
-                    <Save className="w-4 h-4 mr-2" />
-                    {createMutation.isPending ? "Creating..." : "Create Item"}
+                    {createMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        Create Item
+                      </>
+                    )}
                   </Button>
                 </CardContent>
               </Card>

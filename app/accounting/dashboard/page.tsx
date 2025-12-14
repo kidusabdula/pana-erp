@@ -98,7 +98,7 @@ export default function AccountingDashboard() {
   >([]);
   const [reportData, setReportData] = useState<FinancialReport | null>(null);
   const [filters, setFilters] = useState<DashboardFilters>({
-    company: "Ma Beignet (Demo)",
+    company: "Pana",
     date_from: new Date(new Date().setDate(new Date().getDate() - 30))
       .toISOString()
       .split("T")[0],

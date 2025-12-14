@@ -94,27 +94,39 @@ class FrappeClient {
             }
           }
         } catch (e) {
-          console.warn("Failed to parse _server_messages, falling back to default message.");
+          console.warn(
+            "Failed to parse _server_messages, falling back to default message."
+          );
         }
       }
 
       // 2. Fallback: Infer message from the raw exception string if _server_messages wasn't helpful
       if (userFriendlyMessage === "An unexpected error occurred.") {
-        const rawError = error.exceptions?.join(' ') || error.exception || '';
-        if (rawError.includes("DuplicateEntryError") || rawError.includes("already exists")) {
+        const rawError = error.exceptions?.join(" ") || error.exception || "";
+        if (
+          rawError.includes("DuplicateEntryError") ||
+          rawError.includes("already exists")
+        ) {
           userFriendlyMessage = "A record with these details already exists.";
           statusCode = 409;
         } else if (rawError.includes("PermissionError")) {
-          userFriendlyMessage = "You do not have permission to perform this action.";
+          userFriendlyMessage =
+            "You do not have permission to perform this action.";
           statusCode = 403;
-        } else if (rawError.includes("DoesNotExistError") || rawError.includes("not found")) {
+        } else if (
+          rawError.includes("DoesNotExistError") ||
+          rawError.includes("not found")
+        ) {
           userFriendlyMessage = "The requested resource was not found.";
           statusCode = 404;
-        } else if (rawError.includes("MandatoryError") || rawError.includes("required")) {
+        } else if (
+          rawError.includes("MandatoryError") ||
+          rawError.includes("required")
+        ) {
           userFriendlyMessage = "Required fields are missing.";
           statusCode = 400;
         } else {
-            userFriendlyMessage = error.message; // Use the generic message as a last resort
+          userFriendlyMessage = error.message; // Use the generic message as a last resort
         }
       }
 
@@ -143,12 +155,18 @@ class FrappeClient {
     };
   }
 
-  // *** HELPER: Simple method to remove HTML tags ***
+  // *** HELPER: SSR-safe method to remove HTML tags ***
   private sanitizeHtml(html: string): string {
-    // For production, consider a more robust library like DOMPurify
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = html;
-    return tempDiv.textContent || tempDiv.innerText || '';
+    // Regex-based HTML stripping that works on both server and client
+    return html
+      .replace(/<[^>]*>/g, "") // Remove HTML tags
+      .replace(/&nbsp;/g, " ") // Replace non-breaking spaces
+      .replace(/&amp;/g, "&") // Decode ampersands
+      .replace(/&lt;/g, "<") // Decode less than
+      .replace(/&gt;/g, ">") // Decode greater than
+      .replace(/&quot;/g, '"') // Decode quotes
+      .replace(/&#39;/g, "'") // Decode single quotes
+      .trim();
   }
 }
 

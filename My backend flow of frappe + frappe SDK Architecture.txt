@@ -1,0 +1,557 @@
+- SDK Architecture
+    
+    # **Next.js + Frappe Backend Architecture Documentation**
+    
+    ## **Overview**
+    
+    This document outlines the modern architecture for integrating Next.js 15 with a Frappe/ERPNext backend using the `frappe-js-sdk`. This architecture provides type safety, robust error handling, and maintainable code structure.
+    
+    ## **Architecture Diagram**
+    
+    ```
+    ┌─────────────────────────────────────────────────────────────┐
+    │                    Next.js 16 Frontend                      │
+    │                                                             │
+    │  ┌─────────────────┐    ┌─────────────────┐                │
+    │  │   API Routes    │    │   Components    │                │
+    │  │   (/api/*)      │    │   (App Router)  │                │
+    │  └────────┬────────┘    └─────────────────┘                │
+    │           │                                                 │
+    │  ┌────────▼────────┐    ┌─────────────────┐                │
+    │  │  API Template   │    │   Type Definitions              │
+    │  │  (lib/api-template)│  │   (types/*)     │                │
+    │  └────────┬────────┘    └─────────────────┘                │
+    │           │                                                 │
+    │  ┌────────▼────────┐                                        │
+    │  │ Frappe Client   │                                        │
+    │  │ (lib/frappe-client)│                                     │
+    │  └────────┬────────┘                                        │
+    │           │                                                 │
+    └───────────┼─────────────────────────────────────────────────┘
+                │
+                ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │                  Frappe/ERPNext Backend                     │
+    │                   (<http://your-erp-url>)                     │
+    └─────────────────────────────────────────────────────────────┘
+    
+    ```
+    
+    ## **File Structure**
+    
+    ```
+    project-root/
+    ├── app/
+    │   ├── api/
+    │   │   ├── test-api/
+    │   │   │   └── route.ts
+    │   │   ├── items/
+    │   │   │   └── route.ts
+    │   │   └── ...other-routes/
+    │   └── ...other-app-directories/
+    ├── lib/
+    │   ├── frappe-client.ts      # Frappe SDK wrapper
+    │   └── api-template.ts       # API request handler
+    ├── types/
+    │   └── item.ts               # TypeScript interfaces
+    └── .env.local                # Environment variables
+    
+    ```
+    
+    ## **1. Environment Variables (.env.local)**
+    
+    ```bash
+    # Frappe Backend Configuration
+    NEXT_PUBLIC_ERP_API_URL=http://your-erp-instance-url
+    ERP_API_KEY=your_api_key_here
+    ERP_API_SECRET=your_api_secret_here
+    
+    ```
+    
+    ## **2. Core Utility: Frappe Client (lib/frappe-client.ts)**
+    
+    ```tsx
+    import { FrappeApp } from 'frappe-js-sdk';2
+    
+    // Frappe Error Interface
+    export interface FrappeError {
+      message: string;
+      httpStatus?: number;
+      httpStatusText?: string;
+      exceptions?: string[];
+      exception?: string;
+    }
+    
+    // Type guard for FrappeError
+    export function isFrappeError(error: unknown): error is FrappeError {
+      return (
+        typeof error === 'object' &&
+        error !== null &&
+        'message' in error &&
+        typeof (error as FrappeError).message === 'string'
+      );
+    }
+    
+    // API Response Types
+    export interface ApiSuccessResponse<T = unknown> {
+      success: true;
+      data: T;
+      message?: string;
+    }
+    
+    export interface ApiErrorResponse {
+      success: false;
+      error: string;
+      details?: string;
+      statusCode?: number;
+      frappeError?: unknown;
+    }
+    
+    export type ApiResponse<T = unknown> = ApiSuccessResponse<T> | ApiErrorResponse;
+    
+    // Frappe Client Singleton
+    class FrappeClient {
+      private static instance: FrappeClient;
+      public db: ReturnType<FrappeApp['db']>;
+      public auth: ReturnType<FrappeApp['auth']>;
+      public call: ReturnType<FrappeApp['call']>;
+      public file: ReturnType<FrappeApp['file']>;
+    
+      private constructor() {
+        const erpApiUrl = process.env.NEXT_PUBLIC_ERP_API_URL;
+        const erpApiKey = process.env.ERP_API_KEY;
+        const erpApiSecret = process.env.ERP_API_SECRET;
+    
+        if (!erpApiUrl || !erpApiKey || !erpApiSecret) {
+          throw new Error('Missing ERP API environment variables');
+        }
+    
+        const frappe = new FrappeApp(erpApiUrl, {
+          useToken: true,
+          token: () => `${erpApiKey}:${erpApiSecret}`,
+          type: 'token',
+        });
+    
+        this.db = frappe.db();
+        this.auth = frappe.auth();
+        this.call = frappe.call();
+        this.file = frappe.file();
+      }
+    
+      public static getInstance(): FrappeClient {
+        if (!FrappeClient.instance) {
+          FrappeClient.instance = new FrappeClient();
+        }
+        return FrappeClient.instance;
+      }
+    
+      // Error handling utility
+      public handleError(error: unknown): ApiErrorResponse {
+        console.error('Frappe Client Error:', error);
+    
+        if (isFrappeError(error)) {
+          return {
+            success: false,
+            error: 'Frappe API Error',
+            details: error.message,
+            statusCode: error.httpStatus,
+            frappeError: error.exceptions || error.exception,
+          };
+        }
+    
+        if (error instanceof Error) {
+          return {
+            success: false,
+            error: 'Application Error',
+            details: error.message,
+          };
+        }
+    
+        return {
+          success: false,
+          error: 'Unknown Error',
+          details: String(error),
+        };
+      }
+    }
+    
+    export const frappeClient = FrappeClient.getInstance();
+    
+    ```
+    
+    ## **3. API Template Handler (lib/api-template.ts)**
+    
+    ```tsx
+    import { NextResponse } from 'next/server';
+    import { frappeClient, ApiResponse, ApiErrorResponse } from './frappe-client';
+    
+    export interface ApiHandlerOptions {
+      requireAuth?: boolean;
+    }
+    
+    export async function handleApiRequest<T>(
+      handler: () => Promise<T>,
+      options: ApiHandlerOptions = { requireAuth: false }
+    ): Promise<NextResponse<ApiResponse<T>>> {
+      try {
+        // Validate environment variables
+        const erpApiUrl = process.env.NEXT_PUBLIC_ERP_API_URL;
+        const erpApiKey = process.env.ERP_API_KEY;
+        const erpApiSecret = process.env.ERP_API_SECRET;
+    
+        if (!erpApiUrl || !erpApiKey || !erpApiSecret) {
+          throw new Error('Missing ERP API environment variables');
+        }
+    
+        // Optional: Verify authentication if required
+        if (options.requireAuth) {
+          const user = await frappeClient.auth.getLoggedInUser();
+          if (!user) {
+            throw new Error('Authentication required');
+          }
+        }
+    
+        // Execute the handler function
+        const data = await handler();
+    
+        const successResponse: ApiResponse<T> = {
+          success: true,
+          data,
+          message: 'Request successful',
+        };
+    
+        return NextResponse.json(successResponse);
+    
+      } catch (error) {
+        const errorResponse = frappeClient.handleError(error);
+    
+        console.error('API Request Error:', {
+          error: errorResponse,
+          timestamp: new Date().toISOString(),
+        });
+    
+        return NextResponse.json(errorResponse, {
+          status: errorResponse.statusCode || 500,
+        });
+      }
+    }
+    
+    // Utility function for endpoint logging
+    export function withEndpointLogging(endpoint: string) {
+      return function <T>(handler: () => Promise<T>) {
+        return async (): Promise<T> => {
+          console.log(`API Call: ${endpoint}`, {
+            timestamp: new Date().toISOString(),
+          });
+          return handler();
+        };
+      };
+    }
+    
+    ```
+    
+    ## **4. Type Definitions (types/item.ts)**
+    
+    ```tsx
+    export interface Item {
+      name: string;
+      item_code: string;
+      item_name: string;
+      stock_uom?: string;
+      description?: string;
+      item_group?: string;
+      brand?: string;
+      has_serial_no?: 0 | 1;
+      has_batch_no?: 0 | 1;
+      is_stock_item?: 0 | 1;
+      disabled?: 0 | 1;
+      // Standard Frappe fields
+      owner?: string;
+      creation?: string;
+      modified?: string;
+      modified_by?: string;
+      docstatus?: 0 | 1 | 2;
+    }
+    
+    export interface ItemCreateRequest {
+      item_code: string;
+      item_name: string;
+      stock_uom: string;
+      description?: string;
+      item_group?: string;
+      brand?: string;
+      has_serial_no?: 0 | 1;
+      has_batch_no?: 0 | 1;
+      is_stock_item?: 0 | 1;
+    }
+    
+    export interface ItemUpdateRequest extends Partial<ItemCreateRequest> {
+      name: string;
+    }
+    
+    ```
+    
+    ## **5. Example API Route (app/api/items/route.ts)**
+    
+    ```tsx
+    import { NextRequest } from 'next/server';
+    import { frappeClient } from '@/lib/frappe-client';
+    import { handleApiRequest, withEndpointLogging } from '@/lib/api-template';
+    import { Item, ItemCreateRequest, ItemUpdateRequest } from '@/types/item';
+    
+    // GET - Fetch all items
+    export async function GET(request: NextRequest) {
+      return handleApiRequest<{ items: Item[] }>(
+        withEndpointLogging('/api/items - GET')(async () => {
+          const { searchParams } = new URL(request.url);
+          const limit = searchParams.get('limit') || '100';
+    
+          const items = await frappeClient.db.getDocList('Item', {
+            fields: ['name', 'item_code', 'item_name', 'stock_uom', 'item_group', 'brand', 'is_stock_item'],
+            orderBy: { field: 'modified', order: 'desc' },
+            limit: parseInt(limit),
+          });
+    
+          return { items };
+        })
+      );
+    }
+    
+    // POST - Create new item
+    export async function POST(request: NextRequest) {
+      return handleApiRequest<{ item: Item }>(
+        withEndpointLogging('/api/items - POST')(async () => {
+          const data: ItemCreateRequest = await request.json();
+    
+          if (!data.item_name || !data.stock_uom) {
+            throw new Error('Missing required fields: item_name and stock_uom');
+          }
+    
+          if (!data.item_code) {
+            data.item_code = data.item_name
+              .toLowerCase()
+              .replace(/\\s+/g, '-')
+              .replace(/[^a-z0-9-]/g, '');
+          }
+    
+          const item = await frappeClient.db.createDoc('Item', data);
+          return { item };
+        })
+      );
+    }
+    
+    // PUT - Update item
+    export async function PUT(request: NextRequest) {
+      return handleApiRequest<{ item: Item }>(
+        withEndpointLogging('/api/items - PUT')(async () => {
+          const { searchParams } = new URL(request.url);
+          const name = searchParams.get('name');
+    
+          if (!name) throw new Error('Item name parameter is required');
+    
+          const data: ItemUpdateRequest = await request.json();
+          const { name: _, ...updateData } = data;
+    
+          const item = await frappeClient.db.updateDoc('Item', name, updateData);
+          return { item };
+        })
+      );
+    }
+    
+    // DELETE - Delete item
+    export async function DELETE(request: NextRequest) {
+      return handleApiRequest<{ message: string }>(
+        withEndpointLogging('/api/items - DELETE')(async () => {
+          const { searchParams } = new URL(request.url);
+          const name = searchParams.get('name');
+    
+          if (!name) throw new Error('Item name parameter is required');
+    
+          await frappeClient.db.deleteDoc('Item', name);
+          return { message: `Item ${name} deleted successfully` };
+        })
+      );
+    }
+    
+    ```
+    
+    ## **6. Simple Test Route (app/api/test-api/route.ts)**
+    
+    ```tsx
+    import { handleApiRequest, withEndpointLogging } from '@/lib/api-template';
+    
+    interface TestResponse {
+      user: string;
+      timestamp: string;
+    }
+    
+    export async function GET() {
+      return handleApiRequest<TestResponse>(
+        withEndpointLogging('/api/test-api')(async () => {
+          const user = await frappeClient.auth.getLoggedInUser();
+    
+          if (!user) {
+            throw new Error('No user data received from API');
+          }
+    
+          return {
+            user,
+            timestamp: new Date().toISOString(),
+          };
+        })
+      );
+    }
+    
+    ```
+    
+    ## **Key Features & Benefits**
+    
+    ### **✅ Type Safety**
+    
+    - Full TypeScript implementation
+    - No `any` or `unknown` types
+    - Proper interfaces for all data structures
+    
+    ### **✅ Error Handling**
+    
+    - Comprehensive error catching
+    - Frappe-specific error detection
+    - Consistent error response format
+    - Detailed logging
+    
+    ### **✅ Singleton Pattern**
+    
+    - Single Frappe client instance
+    - Environment variable validation
+    - Reusable across entire application
+    
+    ### **✅ API Consistency**
+    
+    - Standardized response format
+    - Uniform error handling
+    - Consistent logging
+    
+    ### **✅ Maintainability**
+    
+    - Clean, readable code
+    - Separation of concerns
+    - Easy to extend and modify
+    
+    ### **✅ Production Ready**
+    
+    - Environment validation
+    - Proper error mapping
+    - Comprehensive logging
+    - Security best practices
+    
+    ## **Common Frappe SDK Methods**
+    
+    ### **Database Operations**
+    
+    ```tsx
+    // Read
+    await frappeClient.db.getDoc('DocType', 'docname');
+    await frappeClient.db.getDocList('DocType', { fields: [], filters: [] });
+    await frappeClient.db.getCount('DocType', filters);
+    
+    // Write
+    await frappeClient.db.createDoc('DocType', data);
+    await frappeClient.db.updateDoc('DocType', 'docname', data);
+    await frappeClient.db.deleteDoc('DocType', 'docname');
+    
+    // Special operations
+    await frappeClient.db.renameDoc('DocType', 'oldname', 'newname');
+    await frappeClient.db.submit(doc);
+    await frappeClient.db.cancel('DocType', 'docname');
+    
+    ```
+    
+    ### **Authentication**
+    
+    ```tsx
+    await frappeClient.auth.loginWithUsernamePassword({ username, password });
+    await frappeClient.auth.getLoggedInUser();
+    await frappeClient.auth.logout();
+    await frappeClient.auth.forgetPassword(email);
+    
+    ```
+    
+    ### **API Calls**
+    
+    ```tsx
+    await frappeClient.call.get('method.name', params);
+    await frappeClient.call.post('method.name', params);
+    await frappeClient.call.put('method.name', params);
+    await frappeClient.call.delete('method.name', params);
+    
+    ```
+    
+    ### **File Operations**
+    
+    ```tsx
+    await frappeClient.file.uploadFile(file, fileArgs, progressCallback);
+    
+    ```
+    
+    ## **Error Response Examples**
+    
+    ### **Success Response**
+    
+    ```json
+    {
+      "success": true,
+      "data": { ... },
+      "message": "Request successful"
+    }
+    
+    ```
+    
+    ### **Error Response**
+    
+    ```json
+    {
+      "success": false,
+      "error": "Frappe API Error",
+      "details": "Specific error message",
+      "statusCode": 500,
+      "frappeError": { ... }
+    }
+    
+    ```
+    
+    ## **Testing Commands**
+    
+    ```bash
+    # Test authentication
+    curl <http://localhost:3000/api/test-api>
+    
+    # Get items
+    curl "<http://localhost:3000/api/items?limit=10>"
+    
+    # Create item
+    curl -X POST <http://localhost:3000/api/items> \\
+      -H "Content-Type: application/json" \\
+      -d '{"item_name": "Test", "stock_uom": "Nos"}'
+    
+    # Update item
+    curl -X PUT "<http://localhost:3000/api/items?name=TEST>" \\
+      -H "Content-Type: application/json" \\
+      -d '{"item_name": "Updated Name"}'
+    
+    # Delete item
+    curl -X DELETE "<http://localhost:3000/api/items?name=TEST>"
+    
+    ```
+    
+    ## **Best Practices**
+    
+    1. **Always use the utility functions** - Don't call Frappe SDK directly
+    2. **Define proper TypeScript interfaces** for all data structures
+    3. **Use environment variables** for configuration
+    4. **Implement proper error handling** in all routes
+    5. **Add comprehensive logging** for debugging
+    6. **Validate inputs** before making API calls
+    7. **Use pagination** for large data sets
+    8. **Implement proper authentication** where needed
+    
+    This architecture provides a robust foundation for building Next.js applications with Frappe/ERPNext backends, ensuring maintainability, type safety, and production readiness.

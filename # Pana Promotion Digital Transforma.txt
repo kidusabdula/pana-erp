@@ -1,0 +1,243 @@
+# Pana Promotion Digital Transformation: Comprehensive Implementation Script & Technical Documentation (v1.2)
+
+**Document Version**: 1.2
+
+**Date**: November 5, 2025
+
+**Project Kickoff**: November 5, 2025 (Today – Aligning with EAT 2:44 PM for Immediate Sprint 1 Planning)
+
+**MVP Pilot Completion**: December 3, 2025 (4 Weeks Post-Kickoff)
+
+**Prepared By**: Grok (Versalabs AI Collaborator) in Partnership with [Your Name], Founder, Versalabs
+
+**Purpose**: This is your singular, executable script for building the full MVP—treating it as a step-by-step playbook with granular actions, decision trees, validation checkpoints, and fallback protocols. It's designed for solo/team execution under Versalabs' 1-week agile sprints, leveraging your existing ERP MVP for 70% efficiency gains. I've expanded v1.1 with exhaustive details: per-task breakdowns (e.g., hour est., tools, edge cases), code structure stubs (non-executable), risk matrices, and scalability probes. Critically: Does this level of detail (850+ hours scripted) risk analysis paralysis in rapid prototyping? Let's probe feasibility in Sprint 1 retro—perhaps trim to 80% density post-pilot.
+
+## Executive Summary
+
+This script operationalizes Pana Promotion's integrated digital infrastructure: a customized VersaForge ERP (Frappe/ERPNext MVP) for printing/signage workflows + a Next.js 16 e-commerce platform for product distribution (business cards, banners, apparel). It enforces operational precision (<48-hour cycles via automated BOM-driven controls), revenue growth (2-5% conversions through SEO-optimized, lazy-loaded catalogs), and extensibility (modular hooks for future AI analytics).
+
+**Key Expansions from v1.1**:
+
+- **Granularity**: Task-level scripts with timed sequences, tool invocations (e.g., Grok prompts for hook gen), and mock data schemas.
+- **Client-Side Focus**: TanStack Query refactor (client-only, ~25 components across ERP/e-com); Zod + React Hook Form for validation; Sonner for toasts—integrated with SDK's enhanced payloads.
+- **Architecture Lock-In**: Standard App Router with template-based routes; centralized `/hooks` for composable patterns (data/domain/ui subdirs).
+- **Process Rigidity**: MoSCoW per task; Notion stubs for immediate copy-paste; daily standup templates.
+- **Risk Emphasis**: 20% contingency baked in; probes for Pana-specifics (e.g., signage substrates in BOM).
+
+**Total Resource Allocation**: 850 hours (200-225/sprint; solo: 40-50/day with LLM acceleration; team: Delegate UI slices). **Success Metrics**: Track via Notion dashboard—e.g., 95% task completion, <5% blocker rate.
+
+**Quick Feasibility Probe**: With your ERP MVP as backbone, we're at 60% pre-built; but TanStack refactor adds 50 hours—viable for Sprint 1, or phase to Day 3? Market fit doubt: Does 20% SEO influx hold for Addis-local queries without A/B testing (e.g., Google Analytics pilot)?
+
+## System Architecture: Detailed Blueprint
+
+**High-Level Flow (Textual Diagram)**:
+
+```
+[Client-Side (Next.js 16 App Router)] ↔ [API Routes (SDK Wrappers + TanStack Hooks)] ↔ [ERP Backend (Frappe MVP Customizations)] ↔ [External: Fenanpay Webhooks]
+  - Bidirectional: Order creation → TanStack mutation → SDK call → BOM decrement + Sonner toast
+  - Validation Layer: Zod schemas on hooks; retry logic on transients (e.g., 3x webhook fails → manual override)
+
+```
+
+**Core Layers Breakdown**:
+
+1. **Backend (VersaForge ERP - Customized Frappe MVP)**:
+    - **Foundation**: Retain SDK singleton (`frappeClient` in `/lib/frappe-client.ts`) for all db/auth/call/file ops. Enhance `handleApiRequest` (in `/lib/api-template.ts`) with toast-friendly payloads: Success `{success: true, data: T, message: 'e.g., Stock synced'}`; Error `{success: false, error: 'e.g., Depletion risk', details: '...', statusCode: 500}`.
+    - **Customization Depth (Regular Until Sprint 3)**: No bespoke doctypes; use inherent config (e.g., Item doctype for substrates/pigments). BOM hierarchies via `getDocList('BOM', {filters: {item: 'apparel-layer'}})`.
+    - **Module Linkages**: Enforced via matrix—e.g., Inventory outputs to Manufacturing (threshold alerts trigger quote embeds).
+    - **Data Ingress Protocol**: UTF-8 CSV/Excel (headerless); Frappe's `frappe.utils.csv_to_list` for parsing. Edge: Dupe excision via `getValue('Item', name, 'item_code')` uniqueness checks.
+    - **Pitfall & Mitigation**: Over-reliance on mocks risks real-data variances (e.g., temporal mismatches in vendor logs)—counter: Sprint 4 segmented infusions (100-record batches) with `frappe.db.rollback` fallbacks.
+2. **Frontend (Next.js 16 App Router - Modular Templates)**:
+    - **Route Strategy**: Template-based for scalability—e.g., `[slug]/page.tsx` as base for products/blog; route groups `(marketing)` vs `(ecom)` for non-overlapping layouts. Global layout (`app/layout.tsx`): `<QueryClientProvider><ThemeProvider><Toaster /></QueryClientProvider>`.
+    - **Themes**: TBD (dark/light via `next-themes` + CSS vars: `-bg: #0a0a0a; --accent: #00D4FF?`—probe: Neon for creative Pana audience, but test contrast ratios >4.5:1 via WAVE tool).
+    - **Client-Side Refactor (TanStack Query v5+)**: Migrate all fetches/mutations to hooks (e.g., `useQuery({queryKey: ['items'], queryFn: () => frappeClient.db.getDocList('Item')})`). Optimistic updates for orders (e.g., `useMutation({onMutate: (newOrder) => queryClient.setQueryData(['orders'], old => [...old, newOrder]) })`). Invalidation: `queryClient.invalidateQueries({queryKey: ['stock']})` on webhook callbacks.
+        - **Scope**: Client pages only (ERP dashboards like `/erp/inventory` + e-com like `/products`); ~25 components refactored (5/sprint).
+        - **Pitfall**: Cache staleness in low-activity (e.g., >24h stock queries)—mit: `staleTime: 5 * 60 * 1000` (5min); probe: Does this align with Pana's real-time needs, or add `refetchInterval: 30000`?
+3. **Client-Side Enhancements (Hooks, Validation, Notifications)**:
+    - **Hooks Architecture (`/hooks` Dir)**: Composable, categorized for reuse—subdirs prevent bloat (e.g., 20+ hooks without collisions).
+        - **/hooks/data**: TanStack wrappers (e.g., `useItemsQuery.ts`: `export const useItemsQuery = (filters?: Filters) => useQuery({queryKey: ['items', filters], ...})`).
+        - **/hooks/domain**: Business logic + Zod (e.g., `useBOMValidation.ts`: `const schema = z.object({components: z.array(z.object({item: z.string()})).min(1)}); const {handleSubmit} = useForm({resolver: zodResolver(schema)})`).
+        - **/hooks/ui**: Helpers (e.g., `useToastMutation.ts`: Wraps Sonner—`toast.success(data.message)` on success; `toast.error(error.details, {action: {label: 'Retry', onClick: mutate}})`).
+        - **Patterns**: Composability (e.g., `useOrderFlow` = `useQuery(['order']) + useMutation(['update'])`); memoization (`useMemo` for deps); shared via `hooks/index.ts` barrels.
+        - **Implementation Script**: (1) Scaffold dir Day 1 Sprint 1; (2) Generate 3-5 hooks/sprint via Grok prompt: "Composable TanStack hook for BOM decomposition, Zod-validated, Sonner-integrated"; (3) Test: Jest mocks for offline (e.g., `vi.mock('@/lib/frappe-client')`).
+        - **Scalability Probe**: Handles 2x SKU growth? Stress: Simulate 500 queries in CodeSandbox—expect <200ms; fallback: Paginate with `useInfiniteQuery`.
+    - **Validation (React Hook Form + Zod)**: Strict, TS-inferred schemas for all forms (e.g., item creation: `z.string().min(1).regex(/^[a-z0-9-]+$/)` for item_code). Uncontrolled inputs for perf; error display via `<ErrorMessage>{errors.item_code?.message}</ErrorMessage>`.
+        - **Edge Cases**: BOM arrays (min 1 component); Fenanpay amounts (>0 ETB). Probe: Overly rigid for creative customizers—allow partial submits?
+    - **Notifications (Sonner)**: Top-right, 3s auto-dismiss; variants (success: green, error: red with retry). Integrate SDK: `if (response.success) toast.success(response.message)`. Accessibility: ARIA labels; undo for mutations (e.g., "Order queued—undo?").
+
+**File Structure (Expanded Script)**:
+
+```
+project-root/ (Mono-Repo: Git Init with Branches per Sprint)
+├── app/ (App Router: 80% Template-Based)
+│   ├── (marketing)/ (Brand: Non-SEO, Static Gen)
+│   │   ├── home/page.tsx (Hero: <HeroSection title="Pana Promotion" subtitle="Bespoke Signage in Addis" />)
+│   │   ├── about/page.tsx (Narrative: <AboutTimeline milestones={panaMilestones} />)
+│   │   ├── contact/page.tsx (Form: <ContactForm schema={contactSchema} />)
+│   │   └── blog/[slug]/page.tsx (Template: <BlogPost slug={params.slug} /> – MDX for content)
+│   ├── (ecom)/ (Dynamic: SSR for SEO)
+│   │   ├── products/page.tsx (Grid: <CatalogGrid filters={useFilters()} />)
+│   │   ├── products/[id]/page.tsx (Customizer: <DragDropEditor onSave={mutateItem} />)
+│   │   ├── checkout/page.tsx (Flow: <CheckoutSteps steps={['Review', 'Payment', 'Confirm']} />)
+│   │   └── api/ (Server: e.g., /api/orders/route.ts – SDK Calls)
+│   ├── (erp)/ (Dashboards: Client-Side Heavy)
+│   │   ├── inventory/page.tsx (<InventoryDashboard queries={useStockQuery()} />)
+│   │   └── orders/page.tsx (<OrderList mutations={useOrderMutation()} />)
+│   ├── globals.css (Tailwind: @layer base { :root { --bg-primary: #0a0a0a; } })
+│   └── layout.tsx (Providers: <html><body><QueryClientProvider><Toaster position="top-right" /></body></html>)
+├── hooks/ (Composable: 15-20 Files by MVP End)
+│   ├── data/useItemsQuery.ts
+│   ├── domain/useBOMValidation.ts
+│   ├── ui/useToastMutation.ts
+│   └── index.ts (Exports: export * from './data';)
+├── lib/ (SDK: Enhance for Toasts)
+│   ├── frappe-client.ts (Singleton: Add toastTrigger(response))
+│   └── api-template.ts (Handler: if(success) toast.success(...))
+├── types/ (Interfaces: Expand Item with panaFields: {substrate?: string})
+├── mocks/ (Datasets: JSON for 50+ SKUs, 500 Customers)
+├── .env.local (ERP_URL, API_KEY/SECRET, FENANPAY_WEBHOOK)
+└── notional/ (Stubs: Tasks Table, Gantt MD)
+
+```
+
+**Deployment & Tools Script**:
+
+- **Dev**: VS Code + ESLint/Prettier; Docker for local Frappe ( `docker run -p 8000:8000 frappe/erpnext:v15`).
+- **Deploys**: Vercel (web previews/sprints); Frappe Cloud (ERP prod post-pilot).
+- **Testing**: Jest (hooks: `renderHook(() => useItemsQuery())`); Pytest (SDK: `def test_bom_decomp()`).
+- **LLM Acceleration**: Grok prompts e.g., "Generate Zod schema for order form with ETB validation"; DeepSeek CLI offline.
+
+## Implementation Process: Sprint-by-Sprint Script
+
+**Overarching Cadence (Versalabs Agile)**: 1-Week Sprints (Mon-Sun: Plan 30min Mon; Standups 10min daily in Notion; Dev Tue-Thu; Client Call/Retro Fri 45min). MoSCoW: Must (Core Functionality), Should (Enhancements), Could (Polish), Won't (Post-MVP). Notion Setup: Copy stubs below to Project/Tasks/Agile Dashboard pages. Daily Log: "Completed: X; Blocker: Y (Grok-resolved via Z); Tomorrow: A".
+
+**Notion Stubs (Copy-Paste Ready)**:
+
+- **Project Page MD**:
+    
+    ```
+    # Pana Promotion Digital Transformation
+    - Client: Pana Promotion, Addis Ababa
+    - Scope: ERP Customization + Next.js E-Com MVP (BOM Sync, Drag-Drop Catalog)
+    - Goals: <48h Cycles, 2-5% Conversion, 95% Stock Precision
+    - Links: [Tasks](tasks-notion-link) | [Dashboard](agile-dashboard-link)
+    
+    ```
+    
+- **Tasks Page Table** (Database View: Columns – Task, MoSCoW, Status, Sprint, Est/Actual Hours, Notes):
+    
+    
+    | Task Name | MoSCoW | Status | Sprint | Est Hours | Actual | Notes |
+    | --- | --- | --- | --- | --- | --- | --- |
+    | Scaffold App Router Groups | Must | To-Do | 1 | 4 | - | Use templates for scalability |
+    | Refactor Inventory Dashboard to TanStack | Should | Backlog | 1 | 8 | - | Invalidate on webhook |
+- **Agile Dashboard MD** (Kanban + Timeline):
+    
+    ```
+    ## Sprint 1 Goal: Bootstrap + Brand Pages
+    - Backlog: [Drag to To-Do]
+    - Timeline (Gantt MD):
+    | Task | Mon | Tue | Wed | Thu | Fri |
+    |------|-----|-----|-----|-----|-----|
+    | ERP Inventory Config | ███ | ███ |     |     |     |
+    | E-Com Home/About |     | ███ | ███ |     |     |
+    
+    ```
+    
+
+### Sprint 1: Initialization (Nov 5-11, 200 Hours – Start Today!)
+
+**Goal**: Lock foundations; deliver brand pages + initial refactor. **Risk Matrix**: High (Refactor Creep) – Mit: Cap at 3 components; Low (Mock Fidelity) – Mit: 100-record test set.
+
+- **Mon Nov 5 (Planning: 30min + 4h Dev)**:
+    - Must: Ratify doc (review this script); Git init mono-repo (`git init pana-mvp; branch sprint-1`); Scaffold App Router (`npx create-next-app@16 . --app`); Notion activation (copy stubs).
+    - Should: Env setup (`cp .env.example .env.local`); Docker Frappe spin-up (`docker-compose up` for mocks).
+    - Could: Theme wireframe (Tailwind Play: Dark bg, neon accents? Probe: Usability for mobile artisans?).
+    - Daily Standup Template: "What: Scaffolded routes. Blocker: None. Focus: Inventory config."
+    - Hours: 4; Artifacts: Repo link share.
+- **Tue Nov 6 (Dev: 8h – ERP Inventory + Orders)**:
+    - Must: Customize Inventory (1) Extend types/Item.ts: Add `substrate?: string; pigment?: string`; (2) Config thresholds (`frappeClient.db.setValue('Stock Settings', 'All', 'reorder_level', 10)`); (3) BOM decomp script in /lib/bom-utils.ts: Loop hierarchies for granular oversight; (4) Test mocks (JSON: 50 SKUs with {item_code: 'banner-vinyl', bom_children: [...] }); Vendor alerts via `frappeClient.call.post('erpnext.stock.doctype.item.item.low_stock_email')`.
+    - Should: Orders bidirectional: (1) Status progression enum in types/order.ts (e.g., 'Inquiry' → 'Production'); (2) E-com interface stub (`/app/(ecom)/api/orders/route.ts`: GET/POST via SDK).
+    - Edge: Depletion risk (threshold <5) → Email + Sonner fallback. Validation: Pytest (`assert len(bom_components) > 0`).
+    - Hours: 8; Probe: Does regular depth suffice for signage composites, or add Sprint 2 substrate fields?
+- **Wed Nov 7 (Dev: 8h – E-Com Brand Pages + Themes)**:
+    - Must: Home/About/Contact/Blog (Template Script): (1) `(marketing)/home/page.tsx`: Hero (<section className="bg-var-bg"><h1>Pana Promotion</h1><p>Bespoke in Addis</p></section>); SEO meta (`<Head><title>Addis Ababa Signage Solutions</title></Head>`); (2) About: Timeline component (array of {year: 2025, event: 'Digital Launch'}); (3) Contact: Form w/ Zod (`useForm({defaultValues: {email: ''}, resolver: z.object({email: z.string().email()})})`); (4) Blog: [slug] dynamic (`getStaticProps: async ({params}) => ({props: {post: await frappeClient.db.getDoc('Blog Post', params.slug)}})`).
+    - Should: Global themes: Install `next-themes` (`npm i next-themes`); layout.tsx: `<ThemeProvider attribute="class" defaultTheme="dark"><Toaster /></ThemeProvider>`; CSS vars for neon.
+    - Could: Progressive loading (Suspense for Blog previews). Hours: 8; Artifacts: Vercel preview (`vercel --prod false`).
+- **Thu Nov 8 (Dev: 8h – Cross-Cuts: Refactor + Arch Setup)**:
+    - Must: TanStack init (`npm i @tanstack/react-query`); layout.tsx Provider; Hooks scaffold: (1) /hooks/data/useItemsQuery.ts (as above); (2) Refactor 3 components (e.g., existing ERP Inventory: Replace useEffect with useQuery); (3) Sonner (`npm i sonner`): Hook integration.
+    - Should: Zod forms in Contact/About (e.g., inquiry submit → mutation to ERP Leads doctype).
+    - Edge: Auth guard in hooks (`if (!user) return null` via `useSession` stub). Hours: 8; Probe: 25% refactor done—perf uplift measurable?
+- **Fri Nov 9 (Client Call + Retro: 45min; 4h Wrap)**:
+    - Must: Bi-weekly immersion prep: Project Update Weekly Review MD (template below); Gantt screenshot (Notion Timeline export PDF).
+    - Should: Mock ingress dry-run (CSV parse 100 customers: `frappeClient.db.insert('Customer', csvData)`).
+    - Retro: Log Notion ("Lesson: TanStack cut fetch time 40%; Improve: Hook memoization"). Hours: 4; Engagements: Zoom call – Share Vercel/Notion read-only.
+
+**Sprint 1 Weekly Review Template (Notion MD – Client-Share)**:
+
+```
+# Versalabs Update: Pana Promotion - Sprint 1 (Nov 5-11)
+## Overview: Bootstrapped ERP cores + Brand storefront for seamless market entry.
+## Completed:
+- Inventory/Orders customized (BOM alerts, status sync).
+- Home/About/Contact/Blog live (SEO-ready, mobile-optimized).
+## Next: Product catalogs + Manufacturing quotes.
+## Visuals: [Vercel Preview](link) | [Gantt PDF](attach)
+## Contact: info@versalabs.com | [Feedback Form](google-form-link)
+
+```
+
+### Sprint 2: Exemplars (Nov 12-18, 225 Hours)
+
+**Goal**: Functional prototypes; deepen integrations. **Risk**: Quoting embeds delay—Mit: Mock Fenanpay first.
+
+- **Mon (Planning: 30min)**: Backlog groom (add 5 tasks: e.g., "Lazy previews"); MoSCoW assign.
+- **Tue (8h – ERP Manufacturing + Accounting)**: Must: (1) Resource alloc (`frappeClient.db.getDocList('Work Order', {filters: {planned_start_date: '>' + today}})`); (2) Milestone verifs (custom script: `frappe.ui.form.on('Work Order', {validate: checkPrototype})`); (3) Cost agg via BOM (`sum(bom_children.map(c => c.amount))`); Fenanpay embeds (stub `/api/quotes/route.ts`: POST → `frappeClient.call.post('frappe.integrations.doctype.fenanpay...')`); Accounting: (4) Billing artifacts from quotes (`frappeClient.db.createDoc('Sales Invoice', {from_quote: quoteName})`); (5) Outlay docs (`Journal Entry` for overheads).
+    - Should: Consolidated summaries (dashboard query: `getDocList('GL Entry', {aggregate: 'sum(debit)'})`).
+    - Edge: Multi-layer apparel BOM (hierarchical recursion)—test depth=5. Hours: 8.
+- **Wed (8h – E-Com Product Page)**: Must: (1) Catalog grids (`<Grid cols={3} data={useItemsQuery({group: 'signage'})} />` w/ filters: TanStack `useFilters` composable); (2) Refinement capabilities (search + facets: `queryFn: ({pageParam = 0}) => getDocList(..., limit: 20, offset: pageParam * 20)`); (3) Extensible templates (Storybook: `npm i @storybook/nextjs` for preview isolation); Lazy previews (`<Suspense fallback={<Skeleton />}><ProductPreview id={item.id} /></Suspense>`).
+    - Should: SEO: Structured markup (`<JsonLd type="Product" data={item} />` via react-helmet).
+    - Could: Infinite scroll via `useInfiniteQuery`. Hours: 8; Probe: 50+ SKUs load <2s?
+- **Thu (8h – Hooks/Validation Expand)**: Must: (1) /hooks/data/useQuotesMutation.ts (TanStack + Zod for quoting); (2) Refactor 5 more (products fetch); (3) Sonner on previews ("Preview loaded").
+    - Should: Domain hook for cost calc (`useBOMCost: computeHierarchy(bom)`). Hours: 8.
+- **Fri (4h Wrap + Call/Retro)**: Must: VistaPrint analogs demo (Vercel); Summary dispatch. Retro: "Blocker: BOM recursion perf—Memoized." Hours: 4.
+
+### Sprint 3: Conjunctions (Nov 19-25, 225 Hours)
+
+**Goal**: Transactional glue; full linkages. **Risk**: HR advisory scope creep—Mit: Defer locales to Won't.
+
+- **Mon-Tue (16h – ERP HR + Linkages)**: Must: (1) Assignment alignment (`frappeClient.db.setValue('Employee', name, 'project', manufacturingDemand)`); (2) Efficacy docs (timesheet integration: `getDocList('Timesheet', {employee: name})`); (3) Compensation prelims (stub: Basic salary calc, locale-deferred); (4) Universal outputs validation (matrix test: Inventory → Accounting flow via integration tests).
+    - Should: Notification channels (`frappeClient.call.post('frappe.core.doctype.notification...')` + email/SMS stubs). Edge: Manufacturing demands spike—resource queueing. Probe: Advisory only, or Must for MVP staffing?
+- **Wed-Thu (16h – E-Com Order Workflow)**: Must: (1) Sequence UI (`<Stepper steps={['Inquiry', 'Quote', 'Design', 'Production']} active={orderStatus} />`); (2) Embedded SEO (query-tuned: `<meta name="keywords" content="Addis Ababa banners" />`); (3) Progressive loading (50% latency: `dynamic(() => import('./HeavyComponent'), {ssr: false})`).
+    - Should: Channels dissemination (Sonner + ERP push). Hours: 16; Could: Dynamic invoicing stub.
+- **Fri (4h + Engagements)**: Interval appraisal; Input solicitation (Google Form: "Workflow friction?").
+
+### Sprint 4: Validation (Nov 26-Dec 2, 200 Hours)
+
+**Goal**: End-to-End Scrutiny; Ratification. **Risk**: Ingress disparities—Mit: Segmented (50-record batches) + verifs.
+
+- **Mon-Tue (16h – ERP Polish)**: Must: (1) CSV/Excel ingress: Script `/scripts/import.py` (Pandas: `pd.read_csv(file, header=None)` → `frappeClient.db.insert_bulk`); (2) Dupe excision (`exists = frappe.db.exists('Item', {'item_code': row[0]})`); (3) >95% reconcs (`frappeClient.call.post('stock.reconciliation.reconcile')`); (4) Permissions config (`frappe.defaults.get_user_permissions`).
+    - Should: Full scrutiny (audit trails: Log all mutations). Edge: 500+ records—batch size=100, timeout=30s.
+- **Wed-Thu (16h – E-Com Checkout + Customizer)**: Must: (1) Fenanpay progression (`<CheckoutForm onSubmit={useFenanpayMutation()} />`: Divert → Callback handler); (2) Logistics estimators (stub: Distance calc via Google Maps API? Probe: Local Addis integration?); (3) Interactive editors (Framer Motion: `<motion.div drag whileDrag={{scale: 1.05}} />` for decals); (4) Informational polish (Blog/About links).
+    - Should: Element placement validation (Zod array min=1). Hours: 16.
+- **Fri (4h + Exhibition)**: Operational exemplar demo; Ratification (client sign-off). Retro: Full project lessons.
+
+## Hazard Assessment, Premises, & Advancement Directives
+
+**Expanded Risk Matrix**:
+
+| Hazard | Likelihood | Impact | Countermeasure | Probe |
+| --- | --- | --- | --- | --- |
+| Timeline Compression (Real Data Deviations) | Medium | High | Segmented infusions; Mock fidelity tests (Jest: 95% pass rate) | CSV sample fidelity confirmed? |
+| Refactor Fatigue (TanStack/Hooks) | High | Medium | Phased (5 components/sprint); LLM gen (Grok: 80% code coverage) | Solo viable, or team UI delegate? |
+| Scalability (2x SKUs/Queries) | Low | High | TanStack pagination; Vercel edge | Benchmark: <100ms @500 records? |
+| UX Rigidity (Zod/Sonner) | Medium | Low | Loose fallbacks (e.g., optional fields); A/B via Vercel flags | Creative customizers tolerant? |
+
+**Premises**: Permissions by Sprint 1 end; Negligible bespoke types; Existing MVP covers 70% variance.
+**Advancement Directives**:
+
+1. **Today (Nov 5)**: Doc ratification + repo/workflow calibration (Git push origin sprint-1).
+2. **Ongoing**: Bi-weekly immersions (Fri calls: Feedback loop via Notion comments).
+3. **Post-MVP**: Q1 2026 – Analytics suite (e.g., TanStack + Mixpanel); Stress-test 20% influx.
+
+**Final Probe & Summary**: This script is your MVP blueprint—extensive for zero-ambiguity execution, but challenge: At 50+ pages equivalent, does it empower or overwhelm iteration? Key Wins: Leveraged MVP for speed; Client polish via hooks/toasts. Confirm tweaks (e.g., theme lock-in), then Sprint 1 granular drops. Ready to build—your move?

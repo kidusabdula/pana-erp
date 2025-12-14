@@ -77,11 +77,11 @@ export async function GET(request: NextRequest) {
       });
 
       // Fetch expense types
-      const expenseTypes = await frappeClient.call.get("frappe.client.get_list", {
-        doctype: "Expense Claim Type",
-        fields: ["name", "description"],
-        limit: 100,
-      });
+      // const expenseTypes = await frappeClient.call.get("frappe.client.get_list", {
+      //   doctype: "Expense Claim Type",
+      //   fields: ["name", "description"],
+      //   limit: 100,
+      // });
 
       // Fetch payment methods
       const paymentMethods = await frappeClient.call.get("frappe.client.get_list", {
@@ -128,10 +128,10 @@ export async function GET(request: NextRequest) {
         root_type: account.root_type,
       })) || [];
 
-      const processedExpenseTypes = expenseTypes.message?.map((type: any) => ({
-        name: type.name,
-        description: type.description,
-      })) || [];
+      // const processedExpenseTypes = expenseTypes.message?.map((type: any) => ({
+      //   name: type.name,
+      //   description: type.description,
+      // })) || [];
 
       const processedPaymentMethods = paymentMethods.message?.map((method: any) => ({
         name: method.name,
@@ -145,7 +145,7 @@ export async function GET(request: NextRequest) {
         items: processedItems,
         warehouses: processedWarehouses,
         accounts: processedAccounts,
-        expenseTypes: processedExpenseTypes,
+        // expenseTypes: processedExpenseTypes,
         paymentMethods: processedPaymentMethods,
       };
 
