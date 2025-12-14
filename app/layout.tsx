@@ -1,15 +1,11 @@
 // app/layout.tsx
+// Pana ERP v1.2 - Root Layout
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import LayoutComponent from "@/components/Layout";
-import "@/styles/globals.css";
-import { ToastProvider } from "@/components/ui/toast";
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+import LayoutClient from "./LayoutClient";
 
 export const metadata: Metadata = {
   title: "Pana ERP",
-  description: "Custom ERP System for Pana Promotions",
+  description: "Enterprise Resource Planning",
 };
 
 export default function RootLayout({
@@ -18,13 +14,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={inter.className}>
-      <body className="m-0 p-0 bg-[#0f0f0f] overflow-auto min-h-screen">
-        <div className="origin-top-left">
-          <ToastProvider>
-            <LayoutComponent>{children}</LayoutComponent>
-          </ToastProvider>
-        </div>
+    <html lang="en" className="dark">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+          rel="preconnect"
+          href="https://fonts.gstatic.com"
+          crossOrigin="anonymous"
+        />
+        {/* Manrope Font - Premium, Geometric, Modern */}
+        <link
+          href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="m-0 p-0 overflow-x-hidden min-h-screen bg-background font-sans">
+        <LayoutClient>{children}</LayoutClient>
       </body>
     </html>
   );

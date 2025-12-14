@@ -1,0 +1,5411 @@
+# Pana ERP - Items Module Refactoring Template
+
+## Overview
+
+This document serves as a comprehensive template for refactoring ERP modules with TanStack Query, Zod validation, React Hook Form, and Sonner notifications. It includes all the fixes, patterns, and components developed for the Items module that can be applied to other modules in the system.
+
+## Architecture
+
+### 1. Layout Configuration
+
+### app/layout.tsx (Server Component)
+
+```tsx
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "@/styles/globals.css";
+import LayoutClient from "./LayoutClient";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+
+export const metadata: Metadata = {
+  title: "Pana ERP",
+  description: "Custom ERP System for Pana Promotions",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en" className={inter.className}>
+      <body className="m-0 p-0 bg-[#0f0f0f] overflow-auto min-h-screen">
+        <div className="origin-top-left">
+          <LayoutClient>{children}</LayoutClient>
+        </div>
+      </body>
+    </html>
+  );
+}
+
+```
+
+### app/LayoutClient.tsx (Client Component)
+
+```tsx
+"use client";
+
+import LayoutComponent from "@/components/Layout/Layout";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
+import { getQueryClient } from "@/lib/query-client";
+import { Toaster } from "sonner";
+
+export default function LayoutClient({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const queryClient = getQueryClient();
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <LayoutComponent>{children}</LayoutComponent>
+      <Toaster position="top-right" richColors closeButton />
+      <ReactQueryDevtools initialIsOpen={false} />
+    </QueryClientProvider>
+  );
+}
+
+```
+
+### 2. Query Client Setup
+
+### lib/query-client.ts
+
+```tsx
+import { QueryClient } from "@tanstack/react-query";
+
+function makeQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 60 * 1000, // 1 minute
+        refetchOnWindowFocus: false,
+      },
+      mutations: {
+        retry: 1,
+      },
+    },
+  });
+}
+
+let browserQueryClient: QueryClient | undefined = undefined;
+
+export function getQueryClient() {
+  if (typeof window === "undefined") {
+    // Server: always make a new query client
+    return makeQueryClient();
+  } else {
+    // Browser: make a new query client if we don't already have one
+    if (!browserQueryClient) browserQueryClient = makeQueryClient();
+    return browserQueryClient;
+  }
+}
+
+```
+
+### 3. Enhanced Frappe Client
+
+### lib/frappe-client.ts
+
+```tsx
+import { FrappeApp } from "frappe-js-sdk";
+
+// Frappe Error Interface
+export interface FrappeError {
+  message: string;
+  httpStatus?: number;
+  httpStatusText?: string;
+  exceptions?: string[];
+  exception?: string;
+  _server_messages?: string; // Enhanced with server messages
+}
+
+// Type guard for FrappeError
+export function isFrappeError(error: unknown): error is FrappeError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof (error as FrappeError).message === "string"
+  );
+}
+
+// API Response Types
+export interface ApiSuccessResponse<T = unknown> {
+  success: true;
+  data: T;
+  message?: string;
+}
+
+export interface ApiErrorResponse {
+  success: false;
+  error: string;
+  details: string; // Enhanced with user-friendly message
+  statusCode?: number;
+  frappeError?: unknown;
+}
+
+export type ApiResponse<T = unknown> = ApiSuccessResponse<T> | ApiErrorResponse;
+
+// Frappe Client Singleton
+class FrappeClient {
+  private static instance: FrappeClient;
+  public db: ReturnType<FrappeApp["db"]>;
+  public auth: ReturnType<FrappeApp["auth"]>;
+  public call: ReturnType<FrappeApp["call"]>;
+  public file: ReturnType<FrappeApp["file"]>;
+
+  private constructor() {
+    const erpApiUrl = process.env.NEXT_PUBLIC_ERP_API_URL;
+    const erpApiKey = process.env.ERP_API_KEY;
+    const erpApiSecret = process.env.ERP_API_SECRET;
+
+    if (!erpApiUrl || !erpApiKey || !erpApiSecret) {
+      throw new Error("Missing ERP API environment variables");
+    }
+
+    const frappe = new FrappeApp(erpApiUrl, {
+      useToken: true,
+      token: () => `${erpApiKey}:${erpApiSecret}`,
+      type: "token",
+    });
+
+    this.db = frappe.db();
+    this.auth = frappe.auth();
+    this.call = frappe.call();
+    this.file = frappe.file();
+  }
+
+  public static getInstance(): FrappeClient {
+    if (!FrappeClient.instance) {
+      FrappeClient.instance = new FrappeClient();
+    }
+    return FrappeClient.instance;
+  }
+
+  // Enhanced error handling with server messages
+  public handleError(error: unknown): ApiErrorResponse {
+    console.error("Frappe Client Error:", error);
+
+    if (isFrappeError(error)) {
+      let userFriendlyMessage = "An unexpected error occurred.";
+      let statusCode = error.httpStatus || 500;
+
+      // 1. Try to get the best message from _server_messages
+      if (error._server_messages) {
+        try {
+          const serverMessages = JSON.parse(error._server_messages);
+          if (Array.isArray(serverMessages) && serverMessages.length > 0) {
+            const parsedMessage = JSON.parse(serverMessages[0]);
+            if (parsedMessage.message) {
+              // Sanitize HTML from the message
+              userFriendlyMessage = this.sanitizeHtml(parsedMessage.message);
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to parse _server_messages, falling back to default message.");
+        }
+      }
+
+      // 2. Fallback: Infer message from the raw exception string
+      if (userFriendlyMessage === "An unexpected error occurred.") {
+        const rawError = error.exceptions?.join(' ') || error.exception || '';
+        if (rawError.includes("DuplicateEntryError") || rawError.includes("already exists")) {
+          userFriendlyMessage = "A record with these details already exists.";
+          statusCode = 409;
+        } else if (rawError.includes("PermissionError")) {
+          userFriendlyMessage = "You do not have permission to perform this action.";
+          statusCode = 403;
+        } else if (rawError.includes("DoesNotExistError") || rawError.includes("not found")) {
+          userFriendlyMessage = "The requested resource was not found.";
+          statusCode = 404;
+        } else if (rawError.includes("MandatoryError") || rawError.includes("required")) {
+          userFriendlyMessage = "Required fields are missing.";
+          statusCode = 400;
+        } else {
+          userFriendlyMessage = error.message; // Use the generic message as a last resort
+        }
+      }
+
+      return {
+        success: false,
+        error: "Request Failed",
+        details: userFriendlyMessage,
+        statusCode,
+        frappeError: error.exceptions || error.exception,
+      };
+    }
+
+    // Fallback for non-Frappe errors
+    if (error instanceof Error) {
+      return {
+        success: false,
+        error: "Application Error",
+        details: error.message,
+      };
+    }
+
+    return {
+      success: false,
+        error: "Unknown Error",
+      details: String(error),
+    };
+  }
+
+  // Helper method to remove HTML tags
+  private sanitizeHtml(html: string): string {
+    // For production, consider a more robust library like DOMPurify
+    if (typeof window === 'undefined') return html; // Server-side fallback
+
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    return tempDiv.textContent || tempDiv.innerText || '';
+  }
+}
+
+export const frappeClient = FrappeClient.getInstance();
+
+```
+
+### 4. Type Definitions
+
+### types/item.ts
+
+```tsx
+export interface Item {
+  name: string;
+  item_code: string;
+  item_name: string;
+  item_group: string;
+  stock_uom: string;
+  is_stock_item: number;
+  is_fixed_asset?: number;
+  valuation_rate?: number;
+  brand?: string;
+  disabled?: number;
+  description?: string;
+  qty: number;
+  uom?: string;
+  basic_rate: number;
+  warehouse?: string;
+  // Standard Frappe fields
+  owner?: string;
+  creation?: string;
+  modified?: string;
+  modified_by?: string;
+  docstatus?: 0 | 1 | 2;
+}
+
+// For items with stock information
+export interface ItemWithStock extends Item {
+  actual_qty?: number;
+  reserved_qty?: number;
+  ordered_qty?: number;
+  projected_qty?: number;
+}
+
+// For creating a new item
+export interface ItemCreateRequest {
+  item_code: string;
+  item_name: string;
+  item_group: string;
+  stock_uom: string;
+  is_stock_item: number;
+  is_fixed_asset?: number;
+  description?: string;
+  brand?: string;
+}
+
+// For updating an existing item
+export interface ItemUpdateRequest extends Partial<ItemCreateRequest> {
+  name: string;
+}
+
+// For dropdown options
+export interface ItemOptions {
+  item_groups: string[];
+  uoms: string[];
+}
+
+```
+
+### 5. Zod Schemas
+
+### hooks/domain/useItemValidation.ts
+
+```tsx
+import { z } from "zod";
+
+export const itemCreateSchema = z.object({
+  item_code: z.string().min(1, "Item code is required"),
+  item_name: z.string().min(1, "Item name is required"),
+  item_group: z.string().min(1, "Item group is required"),
+  stock_uom: z.string().min(1, "Stock UOM is required"),
+  is_stock_item: z.number().int().min(0).max(1).default(1),
+  is_fixed_asset: z.number().int().min(0).max(1).default(0),
+  description: z.string().optional(),
+  brand: z.string().optional(),
+});
+
+export const itemUpdateSchema = itemCreateSchema.partial().extend({
+  name: z.string().min(1, "Item name is required"),
+});
+
+export type ItemCreateFormValues = z.infer<typeof itemCreateSchema>;
+export type ItemUpdateFormValues = z.infer<typeof itemUpdateSchema>;
+
+```
+
+### 6. TanStack Query Hooks
+
+### hooks/data/useItemsQuery.ts
+
+```tsx
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Item, ItemCreateRequest, ItemUpdateRequest, ItemOptions } from "@/types/item";
+import { toast } from "sonner";
+
+// Fetch all items with filters
+export function useItemsQuery(filters?: {
+  name?: string;
+  group?: string;
+  status?: string;
+  id?: string;
+}) {
+  return useQuery({
+    queryKey: ["items", filters],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filters?.name) params.append("name", filters.name);
+      if (filters?.group && filters.group !== "all") params.append("group", filters.group);
+      if (filters?.status && filters.status !== "all") params.append("status", filters.status);
+      if (filters?.id) params.append("id", filters.id);
+
+      const response = await fetch(`/api/stock/item?${params.toString()}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.details || "Failed to fetch items");
+      }
+      return response.json() as Promise<{ data: { items: Item[] } }>;
+    },
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+// Fetch a single item by code
+export function useItemQuery(code: string) {
+  return useQuery({
+    queryKey: ["item", code],
+    queryFn: async () => {
+      const response = await fetch(`/api/stock/item/${encodeURIComponent(code)}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || errorData.details || "Failed to fetch item");
+      }
+      return response.json() as Promise<{ item: Item }>;
+    },
+    enabled: !!code,
+    staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+// Fetch item options (groups and UOMs)
+export function useItemOptionsQuery() {
+  return useQuery({
+    queryKey: ["itemOptions"],
+    queryFn: async () => {
+      const response = await fetch("/api/stock/item/options");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.details || "Failed to fetch item options");
+      }
+      return response.json() as Promise<{ data: ItemOptions }>;
+    },
+    staleTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+// Create a new item with customizable callbacks
+export function useCreateItemMutation(options?: {
+  onSuccess?: (data: { data: { item: Item } }) => void;
+  onError?: (error: Error) => void;
+}) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: ItemCreateRequest) => {
+      const response = await fetch("/api/stock/item", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.details || "Failed to create item");
+      }
+
+      return response.json() as Promise<{ data: { item: Item } }>;
+    },
+    onSuccess: (data) => {
+      // Default success behavior
+      toast.success(`Item "${data.data.item.item_name}" created successfully`);
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+
+      // Execute custom onSuccess from options if it exists
+      options?.onSuccess?.(data);
+    },
+    onError: (error) => {
+      // Default error behavior
+      toast.error(`Failed to create item: ${error.message}`);
+
+      // Execute custom onError from options if it exists
+      options?.onError?.(error);
+    },
+  });
+}
+
+// Update an existing item with customizable callbacks
+export function useUpdateItemMutation(options?: {
+  onSuccess?: (data: { data: { item: Item } }) => void;
+  onError?: (error: Error) => void;
+}) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ name, data }: { name: string; data: ItemUpdateRequest }) => {
+      const response = await fetch(`/api/stock/item?name=${name}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.details || "Failed to update item");
+      }
+
+      return response.json() as Promise<{ data: { item: Item } }>;
+    },
+    onSuccess: (data, variables) => {
+      // Default success behavior
+      toast.success(`Item "${data.data.item.item_name}" updated successfully`);
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+      queryClient.invalidateQueries({ queryKey: ["item", variables.name] });
+
+      // Execute custom onSuccess from options if it exists
+      options?.onSuccess?.(data);
+    },
+    onError: (error) => {
+      // Default error behavior
+      toast.error(`Failed to update item: ${error.message}`);
+
+      // Execute custom onError from options if it exists
+      options?.onError?.(error);
+    },
+  });
+}
+
+// Delete an item
+export function useDeleteItemMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (name: string) => {
+      const response = await fetch(`/api/stock/item?name=${name}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.details || "Failed to delete item");
+      }
+
+      return response.json() as Promise<{ message: string }>;
+    },
+    onSuccess: (_, name) => {
+      toast.success("Item deleted successfully");
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+      queryClient.removeQueries({ queryKey: ["item", name] });
+    },
+    onError: (error) => {
+      toast.error(`Failed to delete item: ${error.message}`);
+    },
+  });
+}
+
+```
+
+### 7. API Routes
+
+### app/api/stock/item/route.ts
+
+```tsx
+import { NextRequest } from 'next/server';
+import { frappeClient } from '@/lib/frappe-client';
+import { handleApiRequest, withEndpointLogging } from '@/lib/api-template';
+import { Item, ItemCreateRequest, ItemUpdateRequest } from '@/types/item';
+
+// GET - Fetch all items
+export async function GET(request: NextRequest) {
+  return handleApiRequest<{ items: Item[] }>(
+    withEndpointLogging('/api/stock/item - GET')(async () => {
+      const { searchParams } = new URL(request.url);
+
+      // Extract filter parameters from URL
+      const nameFilter = searchParams.get('name');
+      const groupFilter = searchParams.get('group');
+      const statusFilter = searchParams.get('status');
+      const limit = searchParams.get('limit') || '100';
+
+      const fields = ['name', 'item_code', 'item_name', 'stock_uom', 'item_group', 'brand', 'is_stock_item', 'is_fixed_asset', 'disabled', 'modified'];
+
+      // Build a single, flat filters array
+      const filters: any[] = [];
+
+      // Handle group filter (AND condition)
+      if (groupFilter && groupFilter !== 'all') {
+        filters.push(['item_group', '=', groupFilter]);
+      }
+
+      // Handle status filter (AND condition)
+      if (statusFilter && statusFilter !== 'all') {
+        const isDisabled = statusFilter === 'Disabled' ? 1 : 0;
+        filters.push(['disabled', '=', isDisabled]);
+      }
+
+      // Handle name search (OR condition)
+      if (nameFilter) {
+        // The frappe-js-sdk interprets an array of arrays as an OR clause
+        filters.push([
+          ['item_name', 'like', `%${nameFilter}%`],
+          ['item_code', 'like', `%${nameFilter}%`]
+        ]);
+      }
+
+      const items = await frappeClient.db.getDocList('Item', {
+        fields: fields,
+        filters: filters, // Pass the correctly structured filters array
+        orderBy: {
+          field: 'modified',
+          order: 'desc',
+        },
+        limit: parseInt(limit),
+      });
+
+      return { items };
+    })
+  );
+}
+
+// POST - Create a new item
+export async function POST(request: NextRequest) {
+  return handleApiRequest<{ item: Item }>(
+    withEndpointLogging('/api/stock/item - POST')(async () => {
+      const data: ItemCreateRequest = await request.json();
+
+      // Validation
+      if (!data.item_name || !data.stock_uom) {
+        throw new Error('Missing required fields: item_name and stock_uom');
+      }
+
+      if (!data.item_code) {
+        // Generate item_code from item_name if not provided
+        data.item_code = data.item_name
+          .toLowerCase()
+          .replace(/\\s+/g, '-')
+          .replace(/[^a-z0-9-]/g, '');
+      }
+
+      // Ensure is_stock_item is set (default to 1 if not provided)
+      if (data.is_stock_item === undefined) {
+        data.is_stock_item = 1;
+      }
+
+      // Create the item
+      await frappeClient.db.createDoc<ItemCreateRequest>('Item', data);
+      const item = await frappeClient.db.getDoc<Item>('Item', data.item_code);
+
+      return { item: item as Item };
+    })
+  );
+}
+
+// PUT - Update an existing item
+export async function PUT(request: NextRequest) {
+  return handleApiRequest<{ item: Item }>(
+    withEndpointLogging('/api/stock/item - PUT')(async () => {
+      const { searchParams } = new URL(request.url);
+      const name = searchParams.get('name');
+
+      if (!name) {
+        throw new Error('Item name (name parameter) is required');
+      }
+
+      const data: ItemUpdateRequest = await request.json();
+
+      // Update the item
+      await frappeClient.db.updateDoc<ItemUpdateRequest>('Item', name, data);
+      const item = await frappeClient.db.getDoc<Item>('Item', name);
+
+      return { item: item as Item };
+    })
+  );
+}
+
+// DELETE - Delete an item
+export async function DELETE(request: NextRequest) {
+  return handleApiRequest<{ message: string }>(
+    withEndpointLogging('/api/stock/item - DELETE')(async () => {
+      const { searchParams } = new URL(request.url);
+      const name = searchParams.get('name');
+
+      if (!name) {
+        throw new Error('Item name (name parameter) is required');
+      }
+
+      await frappeClient.db.deleteDoc('Item', name);
+
+      return { message: `Item ${name} deleted successfully` };
+    })
+  );
+}
+
+```
+
+### app/api/stock/item/options/route.ts
+
+```tsx
+import { NextRequest } from 'next/server';
+import { frappeClient } from '@/lib/frappe-client';
+import { handleApiRequest, withEndpointLogging } from '@/lib/api-template';
+
+export async function GET() {
+  return handleApiRequest<{ item_groups: string[], uoms: string[] }>(
+    withEndpointLogging('/api/stock/item/options - GET')(async () => {
+      // Fetch item groups
+      const itemGroups = await frappeClient.db.getDocList('Item Group', {
+        fields: ['name'],
+        limit: 1000,
+      });
+
+      // Fetch UOMs
+      const uoms = await frappeClient.db.getDocList('UOM', {
+        fields: ['name'],
+        limit: 1000,
+      });
+
+      return {
+        item_groups: itemGroups.map(group => group.name),
+        uoms: uoms.map(uom => uom.name)
+      };
+    })
+  );
+}
+
+```
+
+### app/api/stock/item/[code]/route.ts
+
+```tsx
+import { NextRequest, NextResponse } from 'next/server';
+import { frappeClient } from '@/lib/frappe-client';
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ code: string }> }
+) {
+  try {
+    // Await the params before using its properties
+    const { code } = await params;
+    const decodedCode = decodeURIComponent(code);
+
+    // Fetch item by item_code
+    const items = await frappeClient.db.getDocList('Item', {
+      fields: ['name', 'item_code', 'item_name', 'stock_uom', 'item_group', 'brand', 'is_stock_item', 'is_fixed_asset', 'disabled', 'modified'],
+      filters: [['item_code', '=', decodedCode]],
+      limit: 1,
+    });
+
+    if (items.length === 0) {
+      return NextResponse.json(
+        { error: `Item with code ${decodedCode} not found` },
+        { status: 404 }
+      );
+    }
+
+    // Return the expected format
+    return NextResponse.json({ item: items[0] });
+  } catch (error) {
+    console.error("API Error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
+  }
+}
+
+```
+
+### 8. UI Components
+
+### components/ui/filter-dropdown.tsx
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Filter, Check, X } from "lucide-react";
+
+interface Filters {
+  name: string;
+  group: string;
+  status: string;
+  id: string;
+}
+
+interface FilterDropdownProps {
+  filters: Filters;
+  onFiltersChange: (filters: Filters) => void;
+  itemGroups: string[];
+  onApply: () => void;
+  onClear: () => void;
+}
+
+export function FilterDropdown({
+  filters,
+  onFiltersChange,
+  itemGroups,
+  onApply,
+  onClear,
+}: FilterDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [localFilters, setLocalFilters] = useState<Filters>(filters);
+
+  const handleFilterChange = (field: keyof Filters, value: string) => {
+    setLocalFilters((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleApply = () => {
+    onFiltersChange(localFilters);
+    onApply();
+    setIsOpen(false);
+  };
+
+  const handleClear = () => {
+    const clearedFilters = {
+      name: "",
+      group: "all",
+      status: "all",
+      id: "",
+    };
+    setLocalFilters(clearedFilters);
+    onFiltersChange(clearedFilters);
+    onClear();
+    setIsOpen(false);
+  };
+
+  const hasActiveFilters = filters.name || filters.group !== "all" || filters.status !== "all" || filters.id;
+
+  return (
+    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" className="gap-2">
+          <Filter className="h-4 w-4" />
+          Filters
+          {hasActiveFilters && (
+            <div className="h-2 w-2 rounded-full bg-primary" />
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-80" align="start">
+        <DropdownMenuLabel className="flex items-center justify-between">
+          Filter Items
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-auto p-0 text-xs"
+            onClick={handleClear}
+          >
+            Clear all
+          </Button>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+
+        <div className="p-2 space-y-4">
+          <div>
+            <Label htmlFor="filter-name">Item Name</Label>
+            <Input
+              id="filter-name"
+              placeholder="Filter by name"
+              value={localFilters.name}
+              onChange={(e) => handleFilterChange("name", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="filter-group">Item Group</Label>
+            <Select
+              value={localFilters.group}
+              onValueChange={(value) => handleFilterChange("group", value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="All Groups" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Groups</SelectItem>
+                {itemGroups.map((group) => (
+                  <SelectItem key={group} value={group}>
+                    {group}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label htmlFor="filter-status">Status</Label>
+            <Select
+              value={localFilters.status}
+              onValueChange={(value) => handleFilterChange("status", value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="All Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="Enabled">Enabled</SelectItem>
+                <SelectItem value="Disabled">Disabled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label htmlFor="filter-id">ID</Label>
+            <Input
+              id="filter-id"
+              placeholder="Filter by ID"
+              value={localFilters.id}
+              onChange={(e) => handleFilterChange("id", e.target.value)}
+            />
+          </div>
+        </div>
+
+        <DropdownMenuSeparator />
+
+        <div className="p-2 flex gap-2">
+          <Button variant="outline" size="sm" className="flex-1" onClick={handleClear}>
+            <X className="h-4 w-4 mr-1" />
+            Clear
+          </Button>
+          <Button size="sm" className="flex-1" onClick={handleApply}>
+            <Check className="h-4 w-4 mr-1" />
+            Apply
+          </Button>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+```
+
+### components/ui/search-bar.tsx
+
+```tsx
+"use client";
+
+import { Input } from "@/components/ui/input";
+import { Search } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface SearchBarProps {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  className?: string;
+}
+
+export function SearchBar({
+  value,
+  onChange,
+  placeholder = "Search items...",
+  className,
+}: SearchBarProps) {
+  return (
+    <div className={cn("relative", className)}>
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
+      <Input
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="pl-10 w-full max-w-md"
+      />
+    </div>
+  );
+}
+
+```
+
+### components/ui/global-search.tsx
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Search, Package, Users, FileText, Calculator } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface SearchResult {
+  id: string;
+  title: string;
+  type: "item" | "customer" | "invoice" | "quote";
+  url: string;
+}
+
+export function GlobalSearch() {
+  const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+
+  const handleSearch = async (query: string) => {
+    if (!query) {
+      setResults([]);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // TODO: Implement actual search API
+      // For now, using mock data
+      const mockResults: SearchResult[] = [
+        {
+          id: "1",
+          title: "Business Card Premium",
+          type: "item",
+          url: "/stock/item/BC-PREMIUM",
+        },
+        {
+          id: "2",
+          title: "John Doe",
+          type: "customer",
+          url: "/crm/customers/JOHN-DOE",
+        },
+        {
+          id: "3",
+          title: "INV-2024-001",
+          type: "invoice",
+          url: "/accounting/sales/INV-2024-001",
+        },
+      ].filter(result =>
+        result.title.toLowerCase().includes(query.toLowerCase())
+      );
+
+      setResults(mockResults);
+    } catch (error) {
+      console.error("Search error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getIcon = (type: SearchResult["type"]) => {
+    switch (type) {
+      case "item":
+        return <Package className="h-4 w-4" />;
+      case "customer":
+        return <Users className="h-4 w-4" />;
+      case "invoice":
+        return <FileText className="h-4 w-4" />;
+      case "quote":
+        return <Calculator className="h-4 w-4" />;
+      default:
+        return <Search className="h-4 w-4" />;
+    }
+  };
+
+  const handleSelect = (result: SearchResult) => {
+    router.push(result.url);
+    setOpen(false);
+    setSearchQuery("");
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className="relative h-9 w-64 p-0 justify-start">
+          <Search className="h-4 w-4 mx-3" />
+          <span className="text-sm text-muted-foreground">
+            Search everything...
+          </span>
+          <kbd className="pointer-events-none absolute right-2 top-2.5 hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100 sm:flex">
+            <span className="text-xs">⌘</span>K
+          </kbd>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80 p-0" align="start">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Search items, customers, invoices..."
+            value={searchQuery}
+            onValueChange={setSearchQuery}
+            onValueChange={(value) => {
+              setSearchQuery(value);
+              handleSearch(value);
+            }}
+          />
+          <CommandList>
+            {loading ? (
+              <div className="p-4 text-center text-sm text-muted-foreground">
+                Searching...
+              </div>
+            ) : results.length === 0 ? (
+              <CommandEmpty>No results found.</CommandEmpty>
+            ) : (
+              <CommandGroup heading="Results">
+                {results.map((result) => (
+                  <CommandItem
+                    key={result.id}
+                    onSelect={() => handleSelect(result)}
+                    className="flex items-center gap-2"
+                  >
+                    {getIcon(result.type)}
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{result.title}</p>
+                      <p className="text-xs text-muted-foreground capitalize">
+                        {result.type}
+                      </p>
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+```
+
+### 9. Export Functionality
+
+### lib/export-to-csv.ts
+
+```tsx
+import { Item } from "@/types/item";
+
+export function exportItemsToCSV(items: Item[]) {
+  if (items.length === 0) {
+    return;
+  }
+
+  const headers = [
+    "Item Code",
+    "Item Name",
+    "Item Group",
+    "Stock UOM",
+    "Brand",
+    "Is Stock Item",
+    "Status",
+    "Created",
+    "Modified",
+  ];
+
+  const csvContent = [
+    headers.join(","),
+    ...items.map((item) =>
+      [
+        item.item_code,
+        `"${item.item_name}"`,
+        `"${item.item_group}"`,
+        item.stock_uom,
+        item.brand || "",
+        item.is_stock_item ? "Yes" : "No",
+        item.disabled ? "Disabled" : "Enabled",
+        item.creation || "",
+        item.modified || "",
+      ].join(",")
+    ),
+  ].join("\\n");
+
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+
+  link.setAttribute("href", url);
+  link.setAttribute("download", `items_export_${new Date().toISOString().split('T')[0]}.csv`);
+  link.style.visibility = "hidden";
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+```
+
+### 10. Page Components
+
+### app/stock/item/page.tsx
+
+```tsx
+"use client";
+
+import { useState, useMemo } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Package,
+  Plus,
+  RefreshCw,
+  Eye,
+  Edit,
+  Trash2,
+  Download,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useItemsQuery, useDeleteItemMutation } from "@/hooks/data/useItemsQuery";
+import { useItemOptionsQuery } from "@/hooks/data/useItemsQuery";
+import { FilterDropdown } from "@/components/ui/filter-dropdown";
+import { SearchBar } from "@/components/ui/search-bar";
+import { toast } from "sonner";
+import { Item } from "@/types/item";
+import { exportItemsToCSV } from "@/lib/export-to-csv";
+
+interface Filters {
+  name: string;
+  group: string;
+  status: string;
+  id: string;
+}
+
+export default function ItemPage() {
+  const router = useRouter();
+  const [filters, setFilters] = useState<Filters>({
+    name: "",
+    group: "all",
+    status: "all",
+    id: "",
+  });
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Fetch items with filters
+  const { data: itemsData, isLoading, error, refetch } = useItemsQuery(filters);
+  const { data: optionsData } = useItemOptionsQuery();
+  const deleteMutation = useDeleteItemMutation();
+
+  const items = itemsData?.data?.items || [];
+  const itemGroups = optionsData?.data?.item_groups || [];
+
+  // Filter items based on search query
+  const filteredItems = useMemo(() => {
+    if (!searchQuery) return items;
+
+    const query = searchQuery.toLowerCase();
+    return items.filter(
+      (item) =>
+        item.item_name.toLowerCase().includes(query) ||
+        item.item_code.toLowerCase().includes(query) ||
+        (item.brand && item.brand.toLowerCase().includes(query))
+    );
+  }, [items, searchQuery]);
+
+  const handleFilterChange = (newFilters: Filters) => {
+    setFilters(newFilters);
+  };
+
+  const handleRefresh = () => {
+    refetch();
+  };
+
+  const handleDelete = async (item: Item) => {
+    if (window.confirm(`Are you sure you want to delete "${item.item_name}"?`)) {
+      deleteMutation.mutate(item.name);
+    }
+  };
+
+  const handleExport = () => {
+    exportItemsToCSV(filteredItems);
+    toast.success("Items exported successfully!");
+  };
+
+  const getStatusColor = (disabled?: number) => {
+    return disabled
+      ? "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400"
+      : "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
+  };
+
+  const getStatusText = (disabled?: number) => {
+    return disabled ? "Disabled" : "Enabled";
+  };
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background p-8">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-2">Error loading items</h2>
+          <p className="text-muted-foreground mb-4">
+            {error.message || "Something went wrong"}
+          </p>
+          <Button onClick={handleRefresh}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Try Again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background p-8">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center">
+            <Package className="w-8 h-8 mr-3 text-primary" />
+            Items
+          </h1>
+          <p className="text-muted-foreground">
+            Manage inventory items and stock
+          </p>
+        </div>
+        <div className="flex space-x-2">
+          <Button
+            onClick={handleRefresh}
+            variant="outline"
+            disabled={isLoading}
+            className="flex items-center"
+          >
+            <RefreshCw
+              className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+          <Button onClick={handleExport} variant="outline">
+            <Download className="w-4 h-4 mr-2" />
+            Export
+          </Button>
+          <Button onClick={() => router.push("/stock/item/new")}>
+            <Plus className="w-4 h-4 mr-2" />
+            New Item
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters and Search */}
+      <div className="flex items-center gap-4 mb-6">
+        <FilterDropdown
+          filters={filters}
+          onFiltersChange={handleFilterChange}
+          itemGroups={itemGroups}
+          onApply={() => refetch()}
+          onClear={() => {
+            setFilters({
+              name: "",
+              group: "all",
+              status: "all",
+              id: "",
+            });
+          }}
+        />
+        <SearchBar
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder="Search items..."
+        />
+      </div>
+
+      {/* Items Table */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Inventory Items</CardTitle>
+              <CardDescription>
+                {filteredItems.length} item{filteredItems.length !== 1 ? "s" : ""} found
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item Code</TableHead>
+                    <TableHead>Item Name</TableHead>
+                    <TableHead>Item Group</TableHead>
+                    <TableHead>UOM</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredItems.map((item) => (
+                    <TableRow
+                      key={item.name}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => {
+                        const encodedCode = encodeURIComponent(item.item_code);
+                        router.push(`/stock/item/${encodedCode}`);
+                      }}
+                    >
+                      <TableCell className="font-mono text-sm">
+                        {item.item_code}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {item.item_name}
+                      </TableCell>
+                      <TableCell>{item.item_group}</TableCell>
+                      <TableCell>{item.stock_uom}</TableCell>
+                      <TableCell>
+                        <Badge className={getStatusColor(item.disabled)}>
+                          {getStatusText(item.disabled)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <div className="flex justify-end space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const encodedCode = encodeURIComponent(item.item_code);
+                              router.push(`/stock/item/${encodedCode}`);
+                            }}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const encodedCode = encodeURIComponent(item.item_code);
+                              router.push(`/stock/item/${encodedCode}/edit`);
+                            }}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(item)}
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {filteredItems.length === 0 && !isLoading && (
+            <div className="text-center py-8 text-muted-foreground">
+              <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p>No items found</p>
+              <Button
+                className="mt-4"
+                onClick={() => router.push("/stock/item/new")}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add New Item
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+```
+
+### app/stock/item/new/page.tsx
+
+```tsx
+"use client";
+
+import { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Package, Save, ArrowLeft, Calculator, Check, Search } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { itemCreateSchema, ItemCreateFormValues } from "@/hooks/domain/useItemValidation";
+import { useCreateItemMutation, useItemOptionsQuery } from "@/hooks/data/useItemsQuery";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+
+export default function AddItemPage() {
+  const router = useRouter();
+  const createMutation = useCreateItemMutation({
+    onSuccess: (data) => {
+      router.push(`/stock/item/${data.data.item.item_code}`);
+    },
+  });
+  const { data: optionsData, isLoading: optionsLoading } = useItemOptionsQuery();
+
+  // State to control the open/close state of the Popovers
+  const [itemGroupOpen, setItemGroupOpen] = useState(false);
+  const [stockUomOpen, setStockUomOpen] = useState(false);
+
+  // Local state for search queries
+  const [itemGroupSearch, setItemGroupSearch] = useState("");
+  const [uomSearch, setUomSearch] = useState("");
+
+  const form = useForm({
+    resolver: zodResolver(itemCreateSchema),
+    defaultValues: {
+      item_code: "",
+      item_name: "",
+      item_group: "",
+      stock_uom: "Nos",
+      is_stock_item: 1,
+      is_fixed_asset: 0,
+      description: "",
+      brand: "",
+    },
+  });
+
+  const onSubmit = (data: ItemCreateFormValues) => {
+    createMutation.mutate(data);
+  };
+
+  const handleBack = () => {
+    router.push("/stock/item");
+  };
+
+  // Generate item code from item name
+  const generateItemCode = (name: string) => {
+    return name
+      .toLowerCase()
+      .replace(/\\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "")
+      .toUpperCase();
+  };
+
+  // Auto-generate item code when item name changes
+  useEffect(() => {
+    const subscription = form.watch((value, { name }) => {
+      if (name === "item_name") {
+        const itemName = value.item_name;
+        const currentCode = form.getValues("item_code");
+
+        if (itemName && !currentCode) {
+          const generatedCode = generateItemCode(itemName);
+          form.setValue("item_code", generatedCode, { shouldValidate: true });
+        }
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [form.watch, form]);
+
+  if (optionsLoading) {
+    return (
+      <div className="min-h-screen bg-background p-8 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4">Loading options...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const itemGroups = optionsData?.data?.item_groups || [];
+  const uoms = optionsData?.data?.uoms || [];
+
+  // Filter logic based on search query
+  const filteredItemGroups = itemGroups.filter((group) =>
+    group.toLowerCase().includes(itemGroupSearch.toLowerCase())
+  );
+  const filteredUoms = uoms.filter((uom) =>
+    uom.toLowerCase().includes(uomSearch.toLowerCase())
+  );
+
+  return (
+    <div className="min-h-screen bg-background p-8">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center">
+          <Button variant="ghost" onClick={handleBack} className="mr-4">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold flex items-center">
+              <Package className="w-8 h-8 mr-3 text-primary" />
+              New Item
+            </h1>
+            <p className="text-muted-foreground">Create a new inventory item</p>
+          </div>
+        </div>
+        <Button
+          form="item-form"
+          type="submit"
+          disabled={createMutation.isPending}
+          className="flex items-center"
+        >
+          <Save className="w-4 h-4 mr-2" />
+          {createMutation.isPending ? "Creating..." : "Create Item"}
+        </Button>
+      </div>
+
+      <Form {...form}>
+        <form id="item-form" onSubmit={form.handleSubmit(onSubmit)}>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Column - Form */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Basic Information */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Basic Information</CardTitle>
+                  <CardDescription>Enter basic details for this item</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="item_code"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Item Code *</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Enter item code (e.g., ITM-001)"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="item_name"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Item Name *</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="Enter item name"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* Custom Dropdown Implementation for Item Group */}
+                    <FormField
+                      control={form.control}
+                      name="item_group"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-col">
+                          <FormLabel>Item Group *</FormLabel>
+                          <Popover open={itemGroupOpen} onOpenChange={setItemGroupOpen}>
+                            <PopoverTrigger asChild>
+                              <FormControl>
+                                <Button
+                                  variant="outline"
+                                  role="combobox"
+                                  className={cn(
+                                    "w-full justify-between text-left font-normal",
+                                    !field.value && "text-muted-foreground"
+                                  )}
+                                >
+                                  {field.value
+                                    ? itemGroups.find((group) => group === field.value)
+                                    : "Select item group"}
+                                  <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </FormControl>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-full p-0" align="start">
+                              <div className="p-3">
+                                <Input
+                                  placeholder="Search item group..."
+                                  value={itemGroupSearch}
+                                  onChange={(e) => setItemGroupSearch(e.target.value)}
+                                  className="mb-2"
+                                />
+                              </div>
+                              <div className="max-h-60 overflow-auto p-1">
+                                {filteredItemGroups.length > 0 ? (
+                                  filteredItemGroups.map((group) => (
+                                    <Button
+                                      key={group}
+                                      variant="ghost"
+                                      className="w-full justify-start font-normal"
+                                      onClick={() => {
+                                        form.setValue("item_group", group, { shouldValidate: true });
+                                        setItemGroupOpen(false);
+                                        setItemGroupSearch(""); // Clear search on select
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          group === field.value
+                                            ? "opacity-100"
+                                            : "opacity-0"
+                                        )}
+                                      />
+                                      {group}
+                                    </Button>
+                                  ))
+                                ) : (
+                                  <p className="py-6 text-center text-sm text-muted-foreground">No item group found.</p>
+                                )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    {/* Custom Dropdown Implementation for UOM */}
+                    <FormField
+                      control={form.control}
+                      name="stock_uom"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-col">
+                          <FormLabel>Stock Unit of Measure *</FormLabel>
+                          <Popover open={stockUomOpen} onOpenChange={setStockUomOpen}>
+                            <PopoverTrigger asChild>
+                              <FormControl>
+                                <Button
+                                  variant="outline"
+                                  role="combobox"
+                                  className={cn(
+                                    "w-full justify-between text-left font-normal",
+                                    !field.value && "text-muted-foreground"
+                                  )}
+                                >
+                                  {field.value
+                                    ? uoms.find((uom) => uom === field.value)
+                                    : "Select UOM"}
+                                  <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                              </FormControl>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-full p-0" align="start">
+                              <div className="p-3">
+                                <Input
+                                  placeholder="Search UOM..."
+                                  value={uomSearch}
+                                  onChange={(e) => setUomSearch(e.target.value)}
+                                  className="mb-2"
+                                />
+                              </div>
+                              <div className="max-h-60 overflow-auto p-1">
+                                {filteredUoms.length > 0 ? (
+                                  filteredUoms.map((uom) => (
+                                    <Button
+                                      key={uom}
+                                      variant="ghost"
+                                      className="w-full justify-start font-normal"
+                                      onClick={() => {
+                                        form.setValue("stock_uom", uom, { shouldValidate: true });
+                                        setStockUomOpen(false);
+                                        setUomSearch(""); // Clear search on select
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          uom === field.value
+                                            ? "opacity-100"
+                                            : "opacity-0"
+                                        )}
+                                      />
+                                      {uom}
+                                    </Button>
+                                  ))
+                                ) : (
+                                  <p className="py-6 text-center text-sm text-muted-foreground">No UOM found.</p>
+                                )}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField
+                      control={form.control}
+                      name="is_stock_item"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Maintain Stock</FormLabel>
+                          <Select
+                            onValueChange={(value) => field.onChange(parseInt(value))}
+                            value={String(field.value)}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select option" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="1">Yes</SelectItem>
+                              <SelectItem value="0">No</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="is_fixed_asset"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Is Fixed Asset</FormLabel>
+                          <Select
+                            onValueChange={(value) => field.onChange(parseInt(value))}
+                            value={String(field.value)}
+                          >
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select option" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="1">Yes</SelectItem>
+                              <SelectItem value="0">No</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <FormField
+                    control={form.control}
+                    name="brand"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Brand</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Enter brand name" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="description"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Description</FormLabel>
+                        <FormControl>
+                          <textarea
+                            placeholder="Enter item description"
+                            className="w-full min-h-[80px] p-2 border rounded-md resize-none"
+                            rows={3}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Right Column - Summary */}
+            <div>
+              {/* Summary Card */}
+              <Card className="sticky top-8">
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Calculator className="w-5 h-5 mr-2" />
+                    Item Summary
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span>Item Code:</span>
+                      <span className="font-medium">
+                        {form.watch("item_code") || "-"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Item Name:</span>
+                      <span className="font-medium">
+                        {form.watch("item_name") || "-"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Item Group:</span>
+                      <span>{form.watch("item_group") || "-"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>UOM:</span>
+                      <span>{form.watch("stock_uom") || "-"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Maintain Stock:</span>
+                      <span>{form.watch("is_stock_item") ? "Yes" : "No"}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Fixed Asset:</span>
+                      <span>{form.watch("is_fixed_asset") ? "Yes" : "No"}</span>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t">
+                    <div className="text-sm text-muted-foreground">
+                      <p>Fill in all required fields marked with (*) to create the item.</p>
+                    </div>
+                  </div>
+
+                  <Button
+                    type="submit"
+                    form="item-form"
+                    disabled={createMutation.isPending || !form.formState.isValid}
+                    className="w-full"
+                  >
+                    <Save className="w-4 h-4 mr-2" />
+                    {createMutation.isPending ? "Creating..." : "Create Item"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </form>
+      </Form>
+    </div>
+  );
+}
+
+```
+
+### app/stock/item/[name]/page.tsx
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Package,
+  ArrowLeft,
+  Edit,
+  FileText,
+  Download,
+  Printer,
+  Share,
+} from "lucide-react";
+import { useItemQuery } from "@/hooks/data/useItemsQuery";
+import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
+
+interface MovementHistoryItem {
+  id: string;
+  date: string;
+  type: string;
+  qty: number;
+  uom?: string;
+  reference?: string;
+}
+
+export default function ItemDetailPage() {
+  const router = useRouter();
+  const params = useParams<{ code: string }>();
+  const itemCode = decodeURIComponent(params.code);
+
+  const { data: itemData, isLoading, error } = useItemQuery(itemCode);
+  const [history] = useState<MovementHistoryItem[]>([]); // Placeholder for history
+
+  const item = itemData?.item;
+
+  const handlePrint = () => {
+    window.print();
+    toast.info("Print dialog opened");
+  };
+
+  const handleDownload = () => {
+    // TODO: Implement PDF download
+    toast.info("Download feature coming soon!");
+  };
+
+  const handleShare = () => {
+    // TODO: Implement share functionality
+    toast.info("Share feature coming soon!");
+  };
+
+  const getStatusColor = (disabled?: number) => {
+    return disabled
+      ? "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400"
+      : "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
+  };
+
+  const getStatusText = (disabled?: number) => {
+    return disabled ? "Disabled" : "Enabled";
+  };
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background p-8 flex items-center justify-center">
+        <div className="text-center">
+          <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+          <h2 className="text-xl font-semibold mb-2">Error Loading Item</h2>
+          <p className="text-muted-foreground mb-4">
+            {error.message || "Something went wrong"}
+          </p>
+          <Button onClick={() => router.push("/stock/item")}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Items
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background p-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center mb-8">
+            <Skeleton className="h-8 w-8 mr-3" />
+            <div>
+              <Skeleton className="h-8 w-48 mb-2" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+              <Skeleton className="h-64 rounded-lg" />
+              <Skeleton className="h-96 rounded-lg" />
+            </div>
+            <div>
+              <Skeleton className="h-80 rounded-lg" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!item) {
+    return (
+      <div className="min-h-screen bg-background p-8 flex items-center justify-center">
+        <div className="text-center">
+          <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+          <h2 className="text-xl font-semibold mb-2">Item Not Found</h2>
+          <p className="text-muted-foreground mb-4">The item you're looking for doesn't exist.</p>
+          <Button onClick={() => router.push("/stock/item")}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Items
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-scr
+```
+
+# Pana ERP - Items Module Refactoring Template (Continued)
+
+## Item Detail Page (continued)
+
+```tsx
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+```
+
+### 11. Updated Layout with Enhanced Features
+
+### components/Layout/Layout.tsx (Updated with Global Search and Profile)
+
+```tsx
+"use client";
+
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import {
+  LayoutDashboard,
+  ClipboardList,
+  Users,
+  AlertCircle,
+  Lock,
+  User,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  FileText as FileTextIcon,
+  Receipt,
+  BookOpen,
+  UtensilsCrossed,
+  Package,
+  Box,
+  ShoppingCart,
+  Truck,
+  Settings,
+  LogOut,
+  CreditCard,
+  TrendingUp,
+  Store,
+  FileBarChart,
+  BarChart3,
+  PieChart,
+  Home,
+  DollarSign,
+  ShoppingCart as ShoppingCartIcon,
+  PackageOpen,
+  ClipboardCheck,
+  Factory,
+  Archive,
+  Wrench,
+  HelpCircle,
+  Building,
+  FileSearch,
+  FileText,
+  Calculator,
+  MapPin,
+  ArrowLeftRight,
+  TrendingUpDown,
+  Settings2,
+  Bell,
+  Search,
+  ChevronUp,
+} from "lucide-react";
+import { useState } from "react";
+import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
+import { GlobalSearch } from "@/components/ui/global-search";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+export default function Layout({ children }: { children: React.ReactNode }) {
+  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [isAccountingOpen, setIsAccountingOpen] = useState(false);
+  const [isManufacturingOpen, setIsManufacturingOpen] = useState(false);
+  const [isCRMOpen, setIsCRMOpen] = useState(false);
+  const [isStockOpen, setIsStockOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAssetsOpen, setIsAssetsOpen] = useState(false);
+  const pathname = usePathname();
+
+  const toggleSidebar = () => {
+    setIsCollapsed(!isCollapsed);
+    // Close all dropdowns when collapsing
+    if (!isCollapsed) {
+      setIsAccountingOpen(false);
+      setIsAssetsOpen(false);
+      setIsManufacturingOpen(false);
+      setIsCRMOpen(false);
+      setIsStockOpen(false);
+      setIsSettingsOpen(false);
+    }
+  };
+
+  // Check if a link is active
+  const isActive = (path: string) => {
+    return pathname === path || pathname.startsWith(path + "/");
+  };
+
+  return (
+    <div className="flex h-screen bg-[var(--background)] text-[var(--foreground)] dark overflow-hidden">
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          "flex flex-col border-r border-[var(--sidebar-border)] bg-[var(--sidebar)] text-[var(--sidebar-foreground)] transition-all duration-300 h-full",
+          isCollapsed ? "w-16" : "w-64"
+        )}
+      >
+        {/* Fixed header section */}
+        <div className="p-4 border-b border-[var(--sidebar-border)] flex items-center justify-between flex-shrink-0">
+          {!isCollapsed ? (
+            <div className="flex items-center justify-between w-full">
+              <h2 className="text-lg font-extrabold flex items-center">
+                <img src="/logo.png" alt="VersaForge ERP Logo" className="mr-2 h-6 w-6" />
+                VersaForge ERP
+              </h2>
+              <div className="flex items-center gap-2">
+                <GlobalSearch />
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <Bell className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <Settings className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-center w-full">
+              <img src="/logo.png" alt="VersaForge ERP Logo" className="w-6 h-6 scale-150" />
+            </div>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleSidebar}
+            className="h-3 w-3 flex-shrink-0"
+          >
+            {isCollapsed ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+
+        {/* Scrollable navigation */}
+        <div className="flex-1 overflow-y-auto">
+          <nav className="p-4 space-y-6">
+            {/* Operations Section */}
+            <div>
+              {!isCollapsed && (
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 mb-2">
+                  Operations
+                </h3>
+              )}
+              <div className="space-y-1">
+                <Link href="/dashboard">
+                  <Button
+                    variant="ghost"
+                    className={cn(
+                      "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                      isCollapsed ? "justify-center" : "",
+                      isActive("/dashboard") ? "bg-[var(--sidebar-accent)]" : ""
+                    )}
+                    title="Dashboard"
+                  >
+                    <LayoutDashboard className="h-4 w-4" />
+                    {!isCollapsed && "Dashboard"}
+                  </Button>
+                </Link>
+                <Link href="/pos">
+                  <Button
+                    variant="ghost"
+                    className={cn(
+                      "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                      isCollapsed ? "justify-center" : "",
+                      isActive("/pos") ? "bg-[var(--sidebar-accent)]" : ""
+                    )}
+                    title="Point of Sale"
+                  >
+                    <Store className="h-4 w-4" />
+                    {!isCollapsed && "Point of Sale"}
+                  </Button>
+                </Link>
+
+                {/* Accounting Dropdown */}
+                <div className="space-y-1">
+                  {isCollapsed ? (
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "w-full justify-center px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                        isActive("/accounting")
+                          ? "bg-[var(--sidebar-accent)]"
+                          : ""
+                      )}
+                      title="Accounting"
+                      onClick={() => setIsAccountingOpen(!isAccountingOpen)}
+                    >
+                      <Calculator className="h-4 w-4" />
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "w-full justify-between px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                        isActive("/accounting")
+                          ? "bg-[var(--sidebar-accent)]"
+                          : ""
+                      )}
+                      onClick={() => setIsAccountingOpen(!isAccountingOpen)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Calculator className="h-4 w-4" />
+                        {!isCollapsed && "Accounting"}
+                      </div>
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${
+                          isAccountingOpen ? "rotate-180" : ""
+                        }`}
+                      />
+                    </Button>
+                  )}
+                  {isAccountingOpen && (
+                    <div className={cn("space-y-1", isCollapsed ? "" : "pl-8")}>
+                      <Link href="/accounting/dashboard">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/accounting/dashboard")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Accounting Dashboard"
+                        >
+                          <LayoutDashboard className="h-4 w-4" />
+                          {!isCollapsed && "Dashboard"}
+                        </Button>
+                      </Link>
+                      <Link href="/accounting/payments">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/accounting/payments")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Payments"
+                        >
+                          <CreditCard className="h-4 w-4" />
+                          {!isCollapsed && "Payments"}
+                        </Button>
+                      </Link>
+                      <Link href="/accounting/purchases">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/accounting/purchases")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Purchases"
+                        >
+                          <ShoppingCartIcon className="h-4 w-4" />
+                          {!isCollapsed && "Purchases"}
+                        </Button>
+                      </Link>
+                      <Link href="/accounting/expenses">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/accounting/expenses")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Expenses"
+                        >
+                          <FileTextIcon className="h-4 w-4" />
+                          {!isCollapsed && "Expenses"}
+                        </Button>
+                      </Link>
+                      <Link href="/accounting/sales">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/accounting/sales")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Sales"
+                        >
+                          <TrendingUp className="h-4 w-4" />
+                          {!isCollapsed && "Sales"}
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+
+                {/* CRM Section */}
+                <div className="space-y-1">
+                  {isCollapsed ? (
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "w-full justify-center px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                        isActive("/crm") ? "bg-[var(--sidebar-accent)]" : ""
+                      )}
+                      title="CRM"
+                      onClick={() => setIsCRMOpen(!isCRMOpen)}
+                    >
+                      <Users className="h-4 w-4" />
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "w-full justify-between px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                        isActive("/crm") ? "bg-[var(--sidebar-accent)]" : ""
+                      )}
+                      onClick={() => setIsCRMOpen(!isCRMOpen)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+                        {!isCollapsed && "CRM"}
+                      </div>
+                      <ChevronDown
+                        className={`h-4 w-4 transition-transform ${
+                          isCRMOpen ? "rotate-180" : ""
+                        }`}
+                      />
+                    </Button>
+                  )}
+                  {isCRMOpen && (
+                    <div className={cn("space-y-1", isCollapsed ? "" : "pl-8")}>
+                      <Link href="/crm/dashboard">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/crm/dashboard")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Dashboard"
+                        >
+                          <LayoutDashboard className="h-4 w-4" />
+                          {!isCollapsed && "Dashboard"}
+                        </Button>
+                      </Link>
+                      <Link href="/crm/leads">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/crm/leads")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Leads"
+                        >
+                          <FileSearch className="h-4 w-4" />
+                          {!isCollapsed && "Leads"}
+                        </Button>
+                      </Link>
+                      <Link href="/crm/opportunities">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/crm/opportunities")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Opportunities"
+                        >
+                          <TrendingUp className="h-4 w-4" />
+                          {!isCollapsed && "Opportunities"}
+                        </Button>
+                      </Link>
+                      <Link href="/crm/customers">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/crm/customers")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Customers"
+                        >
+                          <User className="h-4 w-4" />
+                          {!isCollapsed && "Customers"}
+                        </Button>
+                      </Link>
+                      <Link href="/crm/quotations">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/crm/quotations")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Quotations"
+                        >
+                          <FileText className="h-4 w-4" />
+                          {!isCollapsed && "Quotations"}
+                        </Button>
+                      </Link>
+                      <Link href="/crm/sales-orders">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/crm/sales-orders")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Sales Orders"
+                        >
+                          <ShoppingCart className="h-4 w-4" />
+                          {!isCollapsed && "Sales Orders"}
+                        </Button>
+                      </Link>
+                      <Link href="/crm/activities">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/crm/activities")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Activities"
+                        >
+                          <ClipboardList className="h-4 w-4" />
+                          {!isCollapsed && "Activities"}
+                        </Button>
+                      </Link>
+                      <Link href="/crm/communications">
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isCollapsed ? "justify-center" : "",
+                            isActive("/crm/communications")
+                              ? "bg-[var(--sidebar-accent)]"
+                              : ""
+                          )}
+                          title="Communications"
+                        >
+                          <Receipt className="h-4 w-4" />
+                          {!isCollapsed && "Communications"}
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+
+                {/* Inventory Section */}
+                <div>
+                  {!isCollapsed && (
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 mb-2">
+                      Inventory
+                    </h3>
+                  )}
+                  <div className="space-y-1">
+                    {/* Stock Dropdown */}
+                    <div className="space-y-1">
+                      {isCollapsed ? (
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-center px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isActive("/stock") ? "bg-[var(--sidebar-accent)]" : ""
+                          )}
+                          title="Stock Management"
+                          onClick={() => setIsStockOpen(!isStockOpen)}
+                        >
+                          <Package className="h-4 w-4" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-between px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isActive("/stock") ? "bg-[var(--sidebar-accent)]" : ""
+                          )}
+                          onClick={() => setIsStockOpen(!isStockOpen)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Package className="h-4 w-4" />
+                            {!isCollapsed && "Stock Management"}
+                          </div>
+                          <ChevronDown
+                            className={`h-4 w-4 transition-transform ${
+                              isStockOpen ? "rotate-180" : ""
+                            }`}
+                          />
+                        </Button>
+                      )}
+                      {isStockOpen && (
+                        <div className={cn("space-y-1", isCollapsed ? "" : "pl-8")}>
+                          <Link href="/stock/dashboard">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/stock/dashboard")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Stock Dashboard"
+                            >
+                              <LayoutDashboard className="h-4 w-4" />
+                              {!isCollapsed && "Dashboard"}
+                            </Button>
+                          </Link>
+                          <Link href="/stock/delivery-notes">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/stock/delivery-notes")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Delivery Notes"
+                            >
+                              <Truck className="h-4 w-4" />
+                              {!isCollapsed && "Delivery Notes"}
+                            </Button>
+                          </Link>
+                          <Link href="/stock/item">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/stock/item")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Items"
+                            >
+                              <Box className="h-4 w-4" />
+                              {!isCollapsed && "Items"}
+                            </Button>
+                          </Link>
+                          <Link href="/stock/stock-entries">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/stock/stock-entries")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Stock Entries"
+                            >
+                              <PackageOpen className="h-4 w-4" />
+                              {!isCollapsed && "Stock Entries"}
+                            </Button>
+                          </Link>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Asset Management Dropdown */}
+                    <div className="space-y-1">
+                      {isCollapsed ? (
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-center px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isActive("/assets") ? "bg-[var(--sidebar-accent)]" : ""
+                          )}
+                          title="Asset Management"
+                          onClick={() => setIsAssetsOpen(!isAssetsOpen)}
+                        >
+                          <Archive className="h-4 w-4" />
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "w-full justify-between px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                            isActive("/assets") ? "bg-[var(--sidebar-accent)]" : ""
+                          )}
+                          onClick={() => setIsAssetsOpen(!isAssetsOpen)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Archive className="h-4 w-4" />
+                            {!isCollapsed && "Asset Management"}
+                          </div>
+                          <ChevronDown
+                            className={`h-4 w-4 transition-transform ${
+                              isAssetsOpen ? "rotate-180" : ""
+                            }`}
+                          />
+                        </Button>
+                      )}
+                      {isAssetsOpen && (
+                        <div className={cn("space-y-1", isCollapsed ? "" : "pl-8")}>
+                          <Link href="/assets/dashboard">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/assets/dashboard")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Dashboard"
+                            >
+                              <LayoutDashboard className="h-4 w-4" />
+                              {!isCollapsed && "Dashboard"}
+                            </Button>
+                          </Link>
+                          <Link href="/assets/assets">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/assets/assets")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Assets"
+                            >
+                              <PackageOpen className="h-4 w-4" />
+                              {!isCollapsed && "Assets"}
+                            </Button>
+                          </Link>
+                          <Link href="/assets/categories">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/assets/categories")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Categories"
+                            >
+                              <Package className="h-4 w-4" />
+                              {!isCollapsed && "Categories"}
+                            </Button>
+                          </Link>
+                          <Link href="/assets/locations">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/assets/locations")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Locations"
+                            >
+                              <MapPin className="h-4 w-4" />
+                              {!isCollapsed && "Locations"}
+                            </Button>
+                          </Link>
+                          <Link href="/assets/movements">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/assets/movements")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Movements"
+                            >
+                              <ArrowLeftRight className="h-4 w-4" />
+                              {!isCollapsed && "Movements"}
+                            </Button>
+                          </Link>
+                          <Link href="/assets/maintenance">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/assets/maintenance")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Maintenance"
+                            >
+                              <Settings2 className="h-4 w-4" />
+                              {!isCollapsed && "Maintenance"}
+                            </Button>
+                          </Link>
+                          <Link href="/assets/repairs">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/assets/repairs")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Repairs"
+                            >
+                              <Wrench className="h-4 w-4" />
+                              {!isCollapsed && "Repairs"}
+                            </Button>
+                          </Link>
+                          <Link href="/assets/value-adjustments">
+                            <Button
+                              variant="ghost"
+                              className={cn(
+                                "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                                isCollapsed ? "justify-center" : "",
+                                isActive("/assets/value-adjustments")
+                                  ? "bg-[var(--sidebar-accent)]"
+                                  : ""
+                              )}
+                              title="Value Adjustments"
+                            >
+                              <TrendingUpDown className="h-4 w-4" />
+                              {!isCollapsed && "Value Adjustments"}
+                            </Button>
+                          </Link>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Reports Section */}
+                <div>
+                  {!isCollapsed && (
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 mb-2">
+                      Reports & Analytics
+                    </h3>
+                  )}
+                  <div className="space-y-1">
+                    <Link href="/reports">
+                      <Button
+                        variant="ghost"
+                        className={cn(
+                          "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                          isCollapsed ? "justify-center" : "",
+                          isActive("/reports") ? "bg-[var(--sidebar-accent)]" : ""
+                        )}
+                        title="Reports"
+                      >
+                        <PieChart className="h-4 w-4" />
+                        {!isCollapsed && "Reports"}
+                      </Button>
+                    </Link>
+                    <Link href="/analytics">
+                      <Button
+                        variant="ghost"
+                        className={cn(
+                          "w-full justify-start gap-2 px-2 text-[var(--sidebar-foreground)] hover:bg-[var(--sidebar-accent)]",
+                          isCollapsed ? "justify-center" : "",
+                          isActive("/analytics") ? "bg-[var(--sidebar-accent)]" : ""
+                        )}
+                        title="Analytics"
+                      >
+                        <BarChart3 className="h-4 w-4" />
+                        {!isCollapsed && "Analytics"}
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </nav>
+        </div>
+
+        {/* Fixed footer section */}
+        <div className="p-4 border-t border-[var(--sidebar-border)] flex-shrink-0">
+          {isCollapsed ? (
+            <div className="flex justify-center">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <div className="rounded-full bg-[var(--sidebar-primary)] p-1">
+                      <User className="h-4 w-4 text-[var(--sidebar-primary-foreground)]" />
+                    </div>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" side="right">
+                  <DropdownMenuItem>
+                    <User className="h-4 w-4 mr-2" />
+                    Profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <Settings className="h-4 w-4 mr-2" />
+                    Settings
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem>
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <div className="flex items-center gap-3 py-2 rounded-lg hover:bg-[var(--sidebar-accent)] transition-colors cursor-pointer w-full">
+                  <div className="rounded-full bg-[var(--sidebar-primary)] p-1">
+                    <User className="h-5 w-5 text-[var(--sidebar-primary-foreground)]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">Kidus Abdula</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      kidus489@gmail.com
+                    </p>
+                  </div>
+                  <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                </div>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="right" className="w-56">
+                <DropdownMenuItem>
+                  <User className="h-4 w-4 mr-2" />
+                  Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem>
+                  <Settings className="h-4 w-4 mr-2" />
+                  Settings
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem>
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <main className="flex-1 overflow-auto">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+```
+
+## Implementation Guide
+
+### 1. Setting Up a New Module
+
+When creating a new module (e.g., Assets, CRM), follow these steps:
+
+1. **Create Type Definitions**
+    - Define interfaces in `types/[module].ts`
+    - Include create, update, and options interfaces
+2. **Create Zod Schemas**
+    - Define validation schemas in `hooks/domain/use[Module]Validation.ts`
+    - Use appropriate field validations
+3. **Create TanStack Hooks**
+    - Implement data fetching hooks in `hooks/data/use[Module]Query.ts`
+    - Include customizable onSuccess/onError callbacks
+4. **Create API Routes**
+    - Implement CRUD operations in `app/api/[module]/route.ts`
+    - Use proper error handling with `handleApiRequest`
+5. **Create UI Components**
+    - List page with filters, search, and export
+    - Create/Edit forms with React Hook Form
+    - Detail page with actions
+6. **Update Layout**
+    - Add new module to sidebar navigation
+    - Include proper routing structure
+
+### 2. Common Patterns
+
+### Error Handling
+
+```tsx
+// Always use the enhanced error handling
+try {
+  const result = await someOperation();
+  // Handle success
+} catch (error) {
+  // Error is automatically handled by frappeClient.handleError
+  // User sees friendly message in toast
+}
+
+```
+
+### Form Patterns
+
+```tsx
+// Standard form structure with React Hook Form
+<Form {...form}>
+  <form onSubmit={form.handleSubmit(onSubmit)}>
+    <FormField
+      control={form.control}
+      name="fieldName"
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>Field Label</FormLabel>
+          <FormControl>
+            <Input {...field} />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  </form>
+</Form>
+
+```
+
+### Query Patterns
+
+```tsx
+// Standard query with filters
+const { data, isLoading, error } = useItemsQuery(filters);
+
+// Mutation with custom callbacks
+const mutation = useCreateItemMutation({
+  onSuccess: (data) => {
+    // Custom success handling
+    router.push(`/items/${data.item.id}`);
+  },
+  onError: (error) => {
+    // Custom error handling
+    // Default toast already shown
+  },
+});
+
+```
+
+### 3. Testing Checklist
+
+Before marking a module as complete, verify:
+
+- [ ]  All CRUD operations work correctly
+- [ ]  Forms validate with Zod schemas
+- [ ]  Error messages are user-friendly
+- [ ]  Loading states show properly
+- [ ]  Cache invalidation works
+- [ ]  Export functionality works
+- [ ]  Search and filters work
+- [ ]  Navigation is correct
+- [ ]  Mobile responsive design
+
+### 4. Performance Optimizations
+
+1. **Query Optimization**
+    - Set appropriate `staleTime` for each query
+    - Use `select` to fetch only needed fields
+    - Implement pagination for large datasets
+2. **Component Optimization**
+    - Use `React.memo` for expensive components
+    - Implement virtual scrolling for large lists
+    - Debounce search inputs
+3. **Bundle Optimization**
+    - Lazy load heavy components
+    - Use dynamic imports for large libraries
+    - Optimize images and assets
+
+## Conclusion
+
+This comprehensive template provides:
+
+1. **Robust Architecture**: Clean separation of concerns with modular hooks
+2. **Type Safety**: Full TypeScript integration with Zod validation
+3. **User Experience**: Modern UI with search, filters, and smooth interactions
+4. **Error Handling**: User-friendly messages from Frappe server responses
+5. **Performance**: Optimized queries and components
+6. **Maintainability**: Clear patterns that are easy to replicate
+
+Use this as your reference guide for refactoring all ERP modules. Each module should follow the same patterns for consistency across the application.
+
+```tsx
+// lib/export-utils.ts
+import { Item } from '@/types/item';
+
+// Generic type for export data
+export interface ExportableItem {
+  [key: string]: any;
+}
+
+// CSV Export Function
+export function exportToCSV<T extends ExportableItem>(
+  data: T[],
+  filename: string,
+  headers?: { [key: string]: string }
+): void {
+  if (data.length === 0) {
+    console.warn('No data to export');
+    return;
+  }
+
+  // Get all keys from the first item to use as columns
+  const keys = Object.keys(data[0]);
+
+  // Create header row
+  const headerRow = keys.map(key => headers?.[key] || key).join(',');
+
+  // Create data rows
+  const dataRows = data.map(item =>
+    keys.map(key => {
+      const value = item[key];
+      // Handle values that might contain commas or quotes
+      if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+        return `"${value.replace(/"/g, '""')}"`;
+      }
+      return value;
+    }).join(',')
+  );
+
+  // Combine header and data
+  const csvContent = [headerRow, ...dataRows].join('\\n');
+
+  // Create a blob and download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', `${filename}.csv`);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+// PDF Export Function (using jsPDF)
+export async function exportToPDF<T extends ExportableItem>(
+  data: T[],
+  filename: string,
+  title: string,
+  headers?: { [key: string]: string }
+): Promise<void> {
+  // Dynamic import to avoid SSR issues
+  const { jsPDF } = await import('jspdf');
+  const { autoTable } = await import('jspdf-autotable');
+
+  if (data.length === 0) {
+    console.warn('No data to export');
+    return;
+  }
+
+  // Get all keys from the first item to use as columns
+  const keys = Object.keys(data[0]);
+
+  // Create header row
+  const headerRow = keys.map(key => headers?.[key] || key);
+
+  // Create data rows
+  const dataRows = data.map(item =>
+    keys.map(key => {
+      const value = item[key];
+      // Convert to string and handle null/undefined
+      return value !== null && value !== undefined ? String(value) : '';
+    })
+  );
+
+  // Create PDF document
+  const doc = new jsPDF();
+
+  // Add title
+  doc.setFontSize(18);
+  doc.text(title, 14, 22);
+
+  // Add date
+  doc.setFontSize(11);
+  doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+
+  // Add table
+  autoTable(doc, {
+    head: [headerRow],
+    body: dataRows,
+    startY: 40,
+    theme: 'striped',
+    headStyles: { fillColor: [66, 66, 66] },
+    styles: { fontSize: 9 },
+    columnStyles: {
+      0: { cellWidth: 30 } // Adjust column widths as needed
+    }
+  });
+
+  // Save the PDF
+  doc.save(`${filename}.pdf`);
+}
+
+// Export dialog component
+export function getExportOptions(
+  data: any[],
+  filename: string,
+  title: string,
+  headers?: { [key: string]: string }
+) {
+  return {
+    csv: () => exportToCSV(data, filename, headers),
+    pdf: () => exportToPDF(data, filename, title, headers)
+  };
+}
+
+```
+
+Now, let's create a reusable export dialog component:
+
+```tsx
+// components/ui/export-dialog.tsx
+import { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { Download, FileText, FileSpreadsheet } from "lucide-react";
+import { getExportOptions } from "@/lib/export-utils";
+import { ExportableItem } from "@/lib/export-utils";
+
+interface ExportDialogProps {
+  data: ExportableItem[];
+  filename: string;
+  title: string;
+  headers?: { [key: string]: string };
+  children: React.ReactNode;
+}
+
+export function ExportDialog({
+  data,
+  filename,
+  title,
+  headers,
+  children,
+}: ExportDialogProps) {
+  const [open, setOpen] = useState(false);
+  const [format, setFormat] = useState<"csv" | "pdf">("csv");
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = async () => {
+    if (data.length === 0) {
+      console.warn("No data to export");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const exportOptions = getExportOptions(data, filename, title, headers);
+      await exportOptions[format]();
+      setOpen(false);
+    } catch (error) {
+      console.error("Export failed:", error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Download className="h-5 w-5" />
+            Export Data
+          </DialogTitle>
+          <DialogDescription>
+            Choose the format for your export. The current filtered data will be
+            exported.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-4">
+          <RadioGroup value={format} onValueChange={(value) => setFormat(value as "csv" | "pdf")}>
+            <div className="flex items-center space-x-2 mb-3">
+              <RadioGroupItem value="csv" id="csv" />
+              <Label htmlFor="csv" className="flex items-center gap-2 cursor-pointer">
+                <FileSpreadsheet className="h-4 w-4" />
+                CSV (Comma Separated Values)
+              </Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem value="pdf" id="pdf" />
+              <Label htmlFor="pdf" className="flex items-center gap-2 cursor-pointer">
+                <FileText className="h-4 w-4" />
+                PDF (Portable Document Format)
+              </Label>
+            </div>
+          </RadioGroup>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleExport} disabled={isExporting}>
+            {isExporting ? "Exporting..." : "Export"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+```
+
+Now, let's update the ItemPage component to use this export functionality:
+
+```tsx
+// app/stock/item/page.tsx
+"use client";
+
+import { useState, useMemo } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Package,
+  Plus,
+  RefreshCw,
+  Eye,
+  Edit,
+  Trash2,
+  Download,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useItemsQuery, useDeleteItemMutation } from "@/hooks/data/useItemsQuery";
+import { useItemOptionsQuery } from "@/hooks/data/useItemsQuery";
+import { FilterDropdown } from "@/components/ui/filter-dropdown";
+import { SearchBar } from "@/components/ui/search-bar";
+import { ExportDialog } from "@/components/ui/export-dialog";
+import { toast } from "sonner";
+import { Item } from "@/types/item";
+
+interface Filters {
+  name: string;
+  group: string;
+  status: string;
+  id: string;
+}
+
+export default function ItemPage() {
+  const router = useRouter();
+  const [filters, setFilters] = useState<Filters>({
+    name: "",
+    group: "all",
+    status: "all",
+    id: "",
+  });
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // State for the delete confirmation dialog
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<Item | null>(null);
+
+  // Fetch items with filters
+  const { data: itemsData, isLoading, error, refetch } = useItemsQuery(filters);
+  const { data: optionsData } = useItemOptionsQuery();
+  const deleteMutation = useDeleteItemMutation();
+
+  const items = itemsData?.data?.items || [];
+  const itemGroups = optionsData?.data?.item_groups || [];
+
+  // Filter items based on search query
+  const filteredItems = useMemo(() => {
+    if (!searchQuery) return items;
+
+    const query = searchQuery.toLowerCase();
+    return items.filter(
+      (item) =>
+        item.item_name.toLowerCase().includes(query) ||
+        item.item_code.toLowerCase().includes(query) ||
+        (item.brand && item.brand.toLowerCase().includes(query))
+    );
+  }, [items, searchQuery]);
+
+  // Prepare data for export with proper headers
+  const exportData = useMemo(() => {
+    return filteredItems.map(item => ({
+      'Item Code': item.item_code,
+      'Item Name': item.item_name,
+      'Item Group': item.item_group,
+      'UOM': item.stock_uom,
+      'Brand': item.brand || '',
+      'Status': item.disabled ? 'Disabled' : 'Enabled',
+      'Is Stock Item': item.is_stock_item ? 'Yes' : 'No',
+      'Is Fixed Asset': item.is_fixed_asset ? 'Yes' : 'No',
+      'Last Modified': new Date(item.modified).toLocaleString()
+    }));
+  }, [filteredItems]);
+
+  const handleFilterChange = (newFilters: Filters) => {
+    setFilters(newFilters);
+  };
+
+  const handleRefresh = () => {
+    refetch();
+  };
+
+  // Function to open the delete dialog
+  const handleDeleteClick = (item: Item) => {
+    setItemToDelete(item);
+    setIsDeleteDialogOpen(true);
+  };
+
+  // Function to confirm the deletion
+  const handleConfirmDelete = () => {
+    if (itemToDelete) {
+      deleteMutation.mutate(itemToDelete.name, {
+        onSuccess: () => {
+          setIsDeleteDialogOpen(false);
+          setItemToDelete(null);
+          toast.success("Item deleted successfully");
+        },
+        onError: (error) => {
+          toast.error(`Failed to delete item: ${error.message}`);
+        }
+      });
+    }
+  };
+
+  // Function to cancel the deletion
+  const handleCancelDelete = () => {
+    setIsDeleteDialogOpen(false);
+    setItemToDelete(null);
+  };
+
+  const getStatusColor = (disabled?: number) => {
+    return disabled ? "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400" : "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
+  };
+
+  const getStatusText = (disabled?: number) => {
+    return disabled ? "Disabled" : "Enabled";
+  };
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background p-8">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-2">Error loading items</h2>
+          <p className="text-muted-foreground mb-4">
+            {error.message || "Something went wrong"}
+          </p>
+          <Button onClick={handleRefresh}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Try Again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background p-8">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center">
+            <Package className="w-8 h-8 mr-3 text-primary" />
+            Items
+          </h1>
+          <p className="text-muted-foreground">
+            Manage inventory items and stock
+          </p>
+        </div>
+        <div className="flex space-x-2">
+          <Button
+            onClick={handleRefresh}
+            variant="outline"
+            disabled={isLoading}
+            className="flex items-center"
+          >
+            <RefreshCw
+              className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+          <ExportDialog
+            data={exportData}
+            filename="items"
+            title="Inventory Items"
+          >
+            <Button variant="outline">
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </Button>
+          </ExportDialog>
+          <Button onClick={() => router.push("/stock/item/new")}>
+            <Plus className="w-4 h-4 mr-2" />
+            New Item
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters and Search */}
+      <div className="flex items-center gap-4 mb-6">
+        <FilterDropdown
+          filters={filters}
+          onFiltersChange={handleFilterChange}
+          itemGroups={itemGroups}
+          onApply={() => refetch()}
+          onClear={() => {
+            setFilters({
+              name: "",
+              group: "all",
+              status: "all",
+              id: "",
+            });
+          }}
+        />
+        <SearchBar
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder="Search items..."
+        />
+      </div>
+
+      {/* Items Table */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Inventory Items</CardTitle>
+              <CardDescription>
+                {filteredItems.length} item{filteredItems.length !== 1 ? "s" : ""} found
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item Code</TableHead>
+                    <TableHead>Item Name</TableHead>
+                    <TableHead>Item Group</TableHead>
+                    <TableHead>UOM</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredItems.map((item) => (
+                    <TableRow
+                      key={item.name}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => {
+                        const encodedName = encodeURIComponent(item.item_name);
+                        router.push(`/stock/item/${encodedName}`);
+                      }}
+                    >
+                      <TableCell className="font-mono text-sm">
+                        {item.item_code}
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {item.item_name}
+                      </TableCell>
+                      <TableCell>{item.item_group}</TableCell>
+                      <TableCell>{item.stock_uom}</TableCell>
+                      <TableCell>
+                        <Badge className={getStatusColor(item.disabled)}>
+                          {getStatusText(item.disabled)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <div className="flex justify-end space-x-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const encodedName = encodeURIComponent(item.item_name);
+                              router.push(`/stock/item/${encodedName}`);
+                            }}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const encodedName = encodeURIComponent(item.item_name);
+                              router.push(`/stock/item/${encodedName}/edit`);
+                            }}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteClick(item)}
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {filteredItems.length === 0 && !isLoading && (
+            <div className="text-center py-8 text-muted-foreground">
+              <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p>No items found</p>
+              <Button
+                className="mt-4"
+                onClick={() => router.push("/stock/item/new")}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add New Item
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the item
+              <span className="font-semibold"> "{itemToDelete?.item_name}" </span>
+              and remove its data from our servers.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelDelete}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleteMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Continue"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+```
+
+Now, let's add the necessary dependencies to your project:
+
+```bash
+npm install jspdf jspdf-autotable
+
+```
+
+Let's also create a hook for easier export functionality:
+
+```tsx
+// hooks/useExport.ts
+import { useState } from "react";
+import { ExportableItem, getExportOptions } from "@/lib/export-utils";
+import { toast } from "sonner";
+
+export function useExport() {
+  const [isExporting, setIsExporting] = useState(false);
+
+  const exportData = async <T extends ExportableItem>(
+    data: T[],
+    filename: string,
+    title: string,
+    format: "csv" | "pdf",
+    headers?: { [key: string]: string }
+  ) => {
+    if (data.length === 0) {
+      toast.warning("No data to export");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const exportOptions = getExportOptions(data, filename, title, headers);
+      await exportOptions[format]();
+      toast.success(`Data exported as ${format.toUpperCase()} successfully`);
+    } catch (error) {
+      console.error("Export failed:", error);
+      toast.error(`Failed to export data: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  return { exportData, isExporting };
+}
+
+```
+
+With these changes, you now have a comprehensive export functionality that can be used across all modules. Here's what we've implemented:
+
+1. **Export Utilities** (`lib/export-utils.ts`):
+    - Generic CSV export function
+    - PDF export function using jsPDF
+    - Helper function to get export options
+2. **Export Dialog Component** (`components/ui/export-dialog.tsx`):
+    - Reusable dialog for choosing export format
+    - Handles the export process with loading states
+3. **Updated ItemPage**:
+    - Integrated the export dialog
+    - Prepared data for export with proper headers
+    - Added success/error toast notifications
+4. **Export Hook** (`hooks/useExport.ts`):
+    - Custom hook for easier export functionality
+    - Handles loading states and error/success notifications
+
+This implementation is:
+
+- **Reusable**: Can be used across all modules with minimal changes
+- **Flexible**: Supports both CSV and PDF formats
+- **User-friendly**: Provides clear feedback through toast notifications
+- **Type-safe**: Uses TypeScript generics for type safety
+
+To use this in other modules, you would:
+
+1. Import the ExportDialog component
+2. Prepare the data in the appropriate format
+3. Wrap the export button with the ExportDialog component
+
+I'll update the implementation to remove the share functionality and modify the print functionality to print the PDF version of the detail page. Let's make these changes:
+
+First, let's update the detail actions utilities:
+
+```tsx
+// lib/detail-actions-utils.ts
+import { ExportableItem, exportToCSV, exportToPDF } from './export-utils';
+
+// Print functionality - generates and prints PDF
+export async function printPDF<T extends ExportableItem>(
+  data: T[],
+  filename: string,
+  title: string,
+  headers?: { [key: string]: string }
+): Promise<void> {
+  try {
+    // Generate the PDF
+    await exportToPDF(data, filename, title, headers);
+
+    // Get the PDF blob URL
+    const pdfBlob = await generatePDFBlob(data, filename, title, headers);
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+
+    // Open the PDF in a new window and trigger print
+    const printWindow = window.open(pdfUrl, '_blank');
+    if (printWindow) {
+      printWindow.onload = () => {
+        printWindow.print();
+        // Clean up the object URL after printing
+        setTimeout(() => {
+          URL.revokeObjectURL(pdfUrl);
+          printWindow.close();
+        }, 100);
+      };
+    } else {
+      // Fallback if popup is blocked
+      const link = document.createElement('a');
+      link.href = pdfUrl;
+      link.download = `${filename}.pdf`;
+      link.click();
+      URL.revokeObjectURL(pdfUrl);
+    }
+  } catch (error) {
+    console.error('Print PDF failed:', error);
+    throw error;
+  }
+}
+
+// Helper function to generate PDF blob
+async function generatePDFBlob<T extends ExportableItem>(
+  data: T[],
+  filename: string,
+  title: string,
+  headers?: { [key: string]: string }
+): Promise<Blob> {
+  // Dynamic import to avoid SSR issues
+  const { jsPDF } = await import('jspdf');
+  const { autoTable } = await import('jspdf-autotable');
+
+  if (data.length === 0) {
+    throw new Error('No data to generate PDF');
+  }
+
+  // Get all keys from the first item to use as columns
+  const keys = Object.keys(data[0]);
+
+  // Create header row
+  const headerRow = keys.map(key => headers?.[key] || key);
+
+  // Create data rows
+  const dataRows = data.map(item =>
+    keys.map(key => {
+      const value = item[key];
+      // Convert to string and handle null/undefined
+      return value !== null && value !== undefined ? String(value) : '';
+    })
+  );
+
+  // Create PDF document
+  const doc = new jsPDF();
+
+  // Add title
+  doc.setFontSize(18);
+  doc.text(title, 14, 22);
+
+  // Add date
+  doc.setFontSize(11);
+  doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+
+  // Add table
+  autoTable(doc, {
+    head: [headerRow],
+    body: dataRows,
+    startY: 40,
+    theme: 'striped',
+    headStyles: { fillColor: [66, 66, 66] },
+    styles: { fontSize: 9 },
+    columnStyles: {
+      0: { cellWidth: 30 } // Adjust column widths as needed
+    }
+  });
+
+  // Return the PDF as a blob
+  return new Promise((resolve) => {
+    doc.output('blob').then((blob) => {
+      resolve(blob);
+    });
+  });
+}
+
+// Download functionality
+export async function downloadData<T extends ExportableItem>(
+  data: T[],
+  filename: string,
+  title: string,
+  format: "csv" | "pdf",
+  headers?: { [key: string]: string }
+): Promise<void> {
+  if (format === "csv") {
+    exportToCSV(data, filename, headers);
+  } else {
+    await exportToPDF(data, filename, title, headers);
+  }
+}
+
+```
+
+Now, let's update the detail actions component to remove the share functionality:
+
+```tsx
+// components/ui/detail-actions.tsx
+import { useState } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { MoreHorizontal, Download, Printer, FileText, FileSpreadsheet } from "lucide-react";
+import { printPDF, downloadData } from "@/lib/detail-actions-utils";
+import { ExportableItem } from "@/lib/export-utils";
+import { toast } from "sonner";
+
+interface DetailActionsProps {
+  data: ExportableItem;
+  downloadData?: ExportableItem[];
+  downloadFilename?: string;
+  downloadTitle?: string;
+  downloadHeaders?: { [key: string]: string };
+}
+
+export function DetailActions({
+  data,
+  downloadData,
+  downloadFilename,
+  downloadTitle,
+  downloadHeaders,
+}: DetailActionsProps) {
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState<"csv" | "pdf">("pdf");
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handlePrint = async () => {
+    if (!downloadData || downloadData.length === 0) {
+      toast.warning("No data available for printing");
+      return;
+    }
+
+    setIsDownloading(true);
+    try {
+      await printPDF(
+        downloadData,
+        downloadFilename || "item-details",
+        downloadTitle || "Item Details",
+        downloadHeaders
+      );
+      toast.success("Print dialog opened");
+    } catch (error) {
+      console.error("Print failed:", error);
+      toast.error("Failed to open print dialog");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!downloadData || downloadData.length === 0) {
+      toast.warning("No data available for download");
+      return;
+    }
+
+    setIsDownloading(true);
+    try {
+      await downloadData(
+        downloadData,
+        downloadFilename || "item-details",
+        downloadTitle || "Item Details",
+        downloadFormat,
+        downloadHeaders
+      );
+      toast.success(`Data downloaded as ${downloadFormat.toUpperCase()} successfully`);
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error(`Failed to download data as ${downloadFormat.toUpperCase()}`);
+    } finally {
+      setIsDownloading(false);
+      setDownloadDialogOpen(false);
+    }
+  };
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm">
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={handlePrint} disabled={isDownloading}>
+            <Printer className="mr-2 h-4 w-4" />
+            Print PDF
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => setDownloadDialogOpen(true)}>
+            <Download className="mr-2 h-4 w-4" />
+            Download
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Dialog open={downloadDialogOpen} onOpenChange={setDownloadDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Download Data</DialogTitle>
+            <DialogDescription>
+              Choose the format for your download.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <RadioGroup value={downloadFormat} onValueChange={(value) => setDownloadFormat(value as "csv" | "pdf")}>
+              <div className="flex items-center space-x-2 mb-3">
+                <RadioGroupItem value="pdf" id="pdf" />
+                <Label htmlFor="pdf" className="flex items-center gap-2 cursor-pointer">
+                  <FileText className="h-4 w-4" />
+                  PDF (Portable Document Format)
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="csv" id="csv" />
+                <Label htmlFor="csv" className="flex items-center gap-2 cursor-pointer">
+                  <FileSpreadsheet className="h-4 w-4" />
+                  CSV (Comma Separated Values)
+                </Label>
+              </div>
+            </RadioGroup>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDownloadDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleDownload} disabled={isDownloading}>
+              {isDownloading ? "Downloading..." : "Download"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+```
+
+Now, let's update the detail header actions component:
+
+```tsx
+// components/ui/detail-header-actions.tsx
+import { Button } from "@/components/ui/button";
+import { Edit, Printer, Download } from "lucide-react";
+import { DetailActions } from "./detail-actions";
+import { ExportableItem } from "@/lib/export-utils";
+
+interface DetailHeaderActionsProps {
+  data: ExportableItem;
+  downloadData?: ExportableItem[];
+  downloadFilename?: string;
+  downloadTitle?: string;
+  downloadHeaders?: { [key: string]: string };
+  onEdit?: () => void;
+}
+
+export function DetailHeaderActions({
+  data,
+  downloadData,
+  downloadFilename,
+  downloadTitle,
+  downloadHeaders,
+  onEdit,
+}: DetailHeaderActionsProps) {
+  const handlePrint = async () => {
+    if (!downloadData || downloadData.length === 0) {
+      return;
+    }
+
+    try {
+      const { printPDF } = await import('@/lib/detail-actions-utils');
+      await printPDF(
+        downloadData,
+        downloadFilename || "item-details",
+        downloadTitle || "Item Details",
+        downloadHeaders
+      );
+    } catch (error) {
+      console.error("Print failed:", error);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!downloadData || downloadData.length === 0) {
+      return;
+    }
+
+    try {
+      const { downloadData: downloadUtil } = await import('@/lib/detail-actions-utils');
+      await downloadUtil(
+        downloadData,
+        downloadFilename || "item-details",
+        downloadTitle || "Item Details",
+        "pdf",
+        downloadHeaders
+      );
+    } catch (error) {
+      console.error("Download failed:", error);
+    }
+  };
+
+  return (
+    <div className="flex space-x-2">
+      <Button variant="outline" size="sm" onClick={handlePrint}>
+        <Printer className="w-4 h-4 mr-2" />
+        Print
+      </Button>
+      <Button variant="outline" size="sm" onClick={handleDownload}>
+        <Download className="w-4 h-4 mr-2" />
+        Download
+      </Button>
+      {onEdit && (
+        <Button size="sm" onClick={onEdit}>
+          <Edit className="w-4 h-4 mr-2" />
+          Edit
+        </Button>
+      )}
+    </div>
+  );
+}
+
+```
+
+Let's update the useDetailActions hook:
+
+```tsx
+// hooks/useDetailActions.ts
+import { useState } from "react";
+import { printPDF, downloadData } from "@/lib/detail-actions-utils";
+import { ExportableItem } from "@/lib/export-utils";
+import { toast } from "sonner";
+
+export function useDetailActions() {
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handlePrint = async (
+    data: ExportableItem[],
+    filename: string,
+    title: string,
+    headers?: { [key: string]: string }
+  ) => {
+    if (data.length === 0) {
+      toast.warning("No data available for printing");
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      await printPDF(data, filename, title, headers);
+      toast.success("Print dialog opened");
+    } catch (error) {
+      console.error("Print failed:", error);
+      toast.error("Failed to open print dialog");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDownload = async (
+    data: ExportableItem[],
+    filename: string,
+    title: string,
+    format: "csv" | "pdf",
+    headers?: { [key: string]: string }
+  ) => {
+    if (data.length === 0) {
+      toast.warning("No data available for download");
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      await downloadData(data, filename, title, format, headers);
+      toast.success(`Data downloaded as ${format.toUpperCase()} successfully`);
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error(`Failed to download data as ${format.toUpperCase()}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return {
+    handlePrint,
+    handleDownload,
+    isProcessing,
+  };
+}
+
+```
+
+Finally, let's update the ItemDetailPage to use the updated components and hooks:
+
+```tsx
+// app/stock/item/[name]/page.tsx
+"use client";
+
+import { useState, useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Package,
+  ArrowLeft,
+  Edit,
+  FileText,
+} from "lucide-react";
+import { useItemQuery } from "@/hooks/data/useItemsQuery";
+import { useDetailActions } from "@/hooks/useDetailActions";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DetailHeaderActions } from "@/components/ui/detail-header-actions";
+import { toast } from "sonner";
+
+interface MovementHistoryItem {
+  id: string;
+  date: string;
+  type: string;
+  qty: number;
+  uom?: string;
+  reference?: string;
+}
+
+export default function ItemDetailPage() {
+  const router = useRouter();
+  const params = useParams<{ name: string }>();
+  const itemName = decodeURIComponent(params.name);
+
+  const { data: itemData, isLoading, error } = useItemQuery(itemName);
+  const [history] = useState<MovementHistoryItem[]>([]); // Placeholder for history
+  const { handlePrint, handleDownload, isProcessing } = useDetailActions();
+
+  const item = itemData?.item;
+
+  // Prepare data for export/download
+  const exportData = useMemo(() => {
+    if (!item) return [];
+
+    return [{
+      'Item Code': item.item_code,
+      'Item Name': item.item_name,
+      'Item Group': item.item_group,
+      'UOM': item.stock_uom,
+      'Brand': item.brand || '',
+      'Status': item.disabled ? 'Disabled' : 'Enabled',
+      'Is Stock Item': item.is_stock_item ? 'Yes' : 'No',
+      'Is Fixed Asset': item.is_fixed_asset ? 'Yes' : 'No',
+      'Description': item.description || '',
+      'Last Modified': new Date(item.modified).toLocaleString()
+    }];
+  }, [item]);
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background p-8 flex items-center justify-center">
+        <div className="text-center">
+          <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+          <h2 className="text-xl font-semibold mb-2">Error Loading Item</h2>
+          <p className="text-muted-foreground mb-4">
+            {error.message || "Something went wrong"}
+          </p>
+          <Button onClick={() => router.push("/stock/item")}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Items
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background p-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center mb-8">
+            <Skeleton className="h-8 w-8 mr-3" />
+            <div>
+              <Skeleton className="h-8 w-48 mb-2" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+              <Skeleton className="h-64 rounded-lg" />
+              <Skeleton className="h-96 rounded-lg" />
+            </div>
+            <div>
+              <Skeleton className="h-80 rounded-lg" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!item) {
+    return (
+      <div className="min-h-screen bg-background p-8 flex items-center justify-center">
+        <div className="text-center">
+          <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+          <h2 className="text-xl font-semibold mb-2">Item Not Found</h2>
+          <p className="text-muted-foreground mb-4">The item you're looking for doesn't exist.</p>
+          <Button onClick={() => router.push("/stock/item")}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Items
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const getStatusColor = (disabled?: number) => {
+    return disabled
+      ? "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400"
+      : "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
+  };
+
+  const getStatusText = (disabled?: number) => {
+    return disabled ? "Disabled" : "Enabled";
+  };
+
+  return (
+    <div className="min-h-screen bg-background p-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center">
+            <Button
+              variant="ghost"
+              onClick={() => router.push("/stock/item")}
+              className="mr-4"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold flex items-center">
+                <Package className="w-8 h-8 mr-3 text-primary" />
+                Item Details
+              </h1>
+              <p className="text-muted-foreground">View and manage item details</p>
+            </div>
+          </div>
+          <DetailHeaderActions
+            data={item}
+            downloadData={exportData}
+            downloadFilename={`item-${item.item_code}`}
+            downloadTitle={`${item.item_name} - Item Details`}
+            onEdit={() => router.push(`/stock/item/${encodeURIComponent(item.item_name)}/edit`)}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column - Details */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Basic Information */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Basic Information</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Item Code</p>
+                        <p className="font-medium text-lg">{item.item_code}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Item Name</p>
+                        <p className="font-medium">{item.item_name}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Status</p>
+                        <Badge className={getStatusColor(item.disabled)}>
+                          {getStatusText(item.disabled)}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Item Group</p>
+                        <p className="font-medium">{item.item_group}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Stock UOM</p>
+                        <p className="font-medium">{item.stock_uom}</p>
+                      </div>
+                      {item.brand && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Brand</p>
+                          <p className="font-medium">{item.brand}</p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-sm text-muted-foreground">Is Stock Item</p>
+                        <p className="font-medium">{item.is_stock_item ? "Yes" : "No"}</p>
+                      </div>
+                      {item.description && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Description</p>
+                          <p className="font-medium text-sm">{item.description}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Movement History */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Movement History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {history.length > 0 ? (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Change</TableHead>
+                          <TableHead>Reference</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {history.map((record) => (
+                          <TableRow key={record.id}>
+                            <TableCell>{record.date}</TableCell>
+                            <TableCell>{record.type}</TableCell>
+                            <TableCell>
+                              {record.type === "ISSUE" || record.type === "SELL"
+                                ? `-${record.qty}`
+                                : `+${record.qty}`} {record.uom || ""}
+                            </TableCell>
+                            <TableCell>{record.reference || ""}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>No movement history available for this item.</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right Column - Summary */}
+          <div>
+            {/* Summary Card */}
+            <Card className="sticky top-8">
+              <CardHeader>
+                <CardTitle>Item Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span>Item Code:</span>
+                    <span className="font-medium">{item.item_code}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Item Name:</span>
+                    <span className="font-medium">{item.item_name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Item Group:</span>
+                    <span>{item.item_group}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Stock UOM:</span>
+                    <span>{item.stock_uom}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Status:</span>
+                    <Badge className={getStatusColor(item.disabled)}>
+                      {getStatusText(item.disabled)}
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Is Stock Item:</span>
+                    <span>{item.is_stock_item ? "Yes" : "No"}</span>
+                  </div>
+                  {item.brand && (
+                    <div className="flex justify-between">
+                      <span>Brand:</span>
+                      <span>{item.brand}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t space-y-2">
+                  <Button variant="outline" className="w-full">
+                    <FileText className="w-4 h-4 mr-2" />
+                    View Stock Balance
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => handleDownload(
+                      exportData,
+                      `item-${item.item_code}`,
+                      `${item.item_name} - Item Details`,
+                      "pdf"
+                    )}
+                    disabled={isProcessing}
+                  >
+                    <FileText className="w-4 h-4 mr-2" />
+                    Download PDF
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+```
+
+With these changes, we've:
+
+1. Removed the share functionality from all components and utilities
+2. Updated the print functionality to generate and print a PDF instead of taking a screenshot
+3. Simplified the detail actions components to focus on print and download
+4. Updated the useDetailActions hook to remove share-related methods
+5. Modified the ItemDetailPage to use the updated components and hooks
+
+The print functionality now:
+
+- Generates a PDF using the same logic as the download functionality
+- Opens the PDF in a new window and triggers the print dialog
+- Falls back to downloading the PDF if popups are blocked
+
+This implementation ensures a consistent experience between the print and download functionalities, with both using the same PDF generation logic. The print button now directly prints the PDF version of the detail page, which provides a more professional and consistent output than a screenshot.
+
+Would you like me to explain any part of this implementation in more detail?
+
+I'll update the implementation to remove the share functionality and modify the print functionality to print the PDF version of the detail page. Let's make these changes:
+
+First, let's update the detail actions utilities:
+
+```tsx
+// lib/detail-actions-utils.ts
+import { ExportableItem, exportToCSV, exportToPDF } from './export-utils';
+
+// Print functionality - generates and prints PDF
+export async function printPDF<T extends ExportableItem>(
+  data: T[],
+  filename: string,
+  title: string,
+  headers?: { [key: string]: string }
+): Promise<void> {
+  try {
+    // Generate the PDF
+    await exportToPDF(data, filename, title, headers);
+
+    // Get the PDF blob URL
+    const pdfBlob = await generatePDFBlob(data, filename, title, headers);
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+
+    // Open the PDF in a new window and trigger print
+    const printWindow = window.open(pdfUrl, '_blank');
+    if (printWindow) {
+      printWindow.onload = () => {
+        printWindow.print();
+        // Clean up the object URL after printing
+        setTimeout(() => {
+          URL.revokeObjectURL(pdfUrl);
+          printWindow.close();
+        }, 100);
+      };
+    } else {
+      // Fallback if popup is blocked
+      const link = document.createElement('a');
+      link.href = pdfUrl;
+      link.download = `${filename}.pdf`;
+      link.click();
+      URL.revokeObjectURL(pdfUrl);
+    }
+  } catch (error) {
+    console.error('Print PDF failed:', error);
+    throw error;
+  }
+}
+
+// Helper function to generate PDF blob
+async function generatePDFBlob<T extends ExportableItem>(
+  data: T[],
+  filename: string,
+  title: string,
+  headers?: { [key: string]: string }
+): Promise<Blob> {
+  // Dynamic import to avoid SSR issues
+  const { jsPDF } = await import('jspdf');
+  const { autoTable } = await import('jspdf-autotable');
+
+  if (data.length === 0) {
+    throw new Error('No data to generate PDF');
+  }
+
+  // Get all keys from the first item to use as columns
+  const keys = Object.keys(data[0]);
+
+  // Create header row
+  const headerRow = keys.map(key => headers?.[key] || key);
+
+  // Create data rows
+  const dataRows = data.map(item =>
+    keys.map(key => {
+      const value = item[key];
+      // Convert to string and handle null/undefined
+      return value !== null && value !== undefined ? String(value) : '';
+    })
+  );
+
+  // Create PDF document
+  const doc = new jsPDF();
+
+  // Add title
+  doc.setFontSize(18);
+  doc.text(title, 14, 22);
+
+  // Add date
+  doc.setFontSize(11);
+  doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+
+  // Add table
+  autoTable(doc, {
+    head: [headerRow],
+    body: dataRows,
+    startY: 40,
+    theme: 'striped',
+    headStyles: { fillColor: [66, 66, 66] },
+    styles: { fontSize: 9 },
+    columnStyles: {
+      0: { cellWidth: 30 } // Adjust column widths as needed
+    }
+  });
+
+  // Return the PDF as a blob
+  return new Promise((resolve) => {
+    doc.output('blob').then((blob) => {
+      resolve(blob);
+    });
+  });
+}
+
+// Download functionality
+export async function downloadData<T extends ExportableItem>(
+  data: T[],
+  filename: string,
+  title: string,
+  format: "csv" | "pdf",
+  headers?: { [key: string]: string }
+): Promise<void> {
+  if (format === "csv") {
+    exportToCSV(data, filename, headers);
+  } else {
+    await exportToPDF(data, filename, title, headers);
+  }
+}
+
+```
+
+Now, let's update the detail actions component to remove the share functionality:
+
+```tsx
+// components/ui/detail-actions.tsx
+import { useState } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { MoreHorizontal, Download, Printer, FileText, FileSpreadsheet } from "lucide-react";
+import { printPDF, downloadData } from "@/lib/detail-actions-utils";
+import { ExportableItem } from "@/lib/export-utils";
+import { toast } from "sonner";
+
+interface DetailActionsProps {
+  data: ExportableItem;
+  downloadData?: ExportableItem[];
+  downloadFilename?: string;
+  downloadTitle?: string;
+  downloadHeaders?: { [key: string]: string };
+}
+
+export function DetailActions({
+  data,
+  downloadData,
+  downloadFilename,
+  downloadTitle,
+  downloadHeaders,
+}: DetailActionsProps) {
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState<"csv" | "pdf">("pdf");
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handlePrint = async () => {
+    if (!downloadData || downloadData.length === 0) {
+      toast.warning("No data available for printing");
+      return;
+    }
+
+    setIsDownloading(true);
+    try {
+      await printPDF(
+        downloadData,
+        downloadFilename || "item-details",
+        downloadTitle || "Item Details",
+        downloadHeaders
+      );
+      toast.success("Print dialog opened");
+    } catch (error) {
+      console.error("Print failed:", error);
+      toast.error("Failed to open print dialog");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!downloadData || downloadData.length === 0) {
+      toast.warning("No data available for download");
+      return;
+    }
+
+    setIsDownloading(true);
+    try {
+      await downloadData(
+        downloadData,
+        downloadFilename || "item-details",
+        downloadTitle || "Item Details",
+        downloadFormat,
+        downloadHeaders
+      );
+      toast.success(`Data downloaded as ${downloadFormat.toUpperCase()} successfully`);
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error(`Failed to download data as ${downloadFormat.toUpperCase()}`);
+    } finally {
+      setIsDownloading(false);
+      setDownloadDialogOpen(false);
+    }
+  };
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm">
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={handlePrint} disabled={isDownloading}>
+            <Printer className="mr-2 h-4 w-4" />
+            Print PDF
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => setDownloadDialogOpen(true)}>
+            <Download className="mr-2 h-4 w-4" />
+            Download
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Dialog open={downloadDialogOpen} onOpenChange={setDownloadDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Download Data</DialogTitle>
+            <DialogDescription>
+              Choose the format for your download.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <RadioGroup value={downloadFormat} onValueChange={(value) => setDownloadFormat(value as "csv" | "pdf")}>
+              <div className="flex items-center space-x-2 mb-3">
+                <RadioGroupItem value="pdf" id="pdf" />
+                <Label htmlFor="pdf" className="flex items-center gap-2 cursor-pointer">
+                  <FileText className="h-4 w-4" />
+                  PDF (Portable Document Format)
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="csv" id="csv" />
+                <Label htmlFor="csv" className="flex items-center gap-2 cursor-pointer">
+                  <FileSpreadsheet className="h-4 w-4" />
+                  CSV (Comma Separated Values)
+                </Label>
+              </div>
+            </RadioGroup>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDownloadDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleDownload} disabled={isDownloading}>
+              {isDownloading ? "Downloading..." : "Download"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+```
+
+Now, let's update the detail header actions component:
+
+```tsx
+// components/ui/detail-header-actions.tsx
+import { Button } from "@/components/ui/button";
+import { Edit, Printer, Download } from "lucide-react";
+import { DetailActions } from "./detail-actions";
+import { ExportableItem } from "@/lib/export-utils";
+
+interface DetailHeaderActionsProps {
+  data: ExportableItem;
+  downloadData?: ExportableItem[];
+  downloadFilename?: string;
+  downloadTitle?: string;
+  downloadHeaders?: { [key: string]: string };
+  onEdit?: () => void;
+}
+
+export function DetailHeaderActions({
+  data,
+  downloadData,
+  downloadFilename,
+  downloadTitle,
+  downloadHeaders,
+  onEdit,
+}: DetailHeaderActionsProps) {
+  const handlePrint = async () => {
+    if (!downloadData || downloadData.length === 0) {
+      return;
+    }
+
+    try {
+      const { printPDF } = await import('@/lib/detail-actions-utils');
+      await printPDF(
+        downloadData,
+        downloadFilename || "item-details",
+        downloadTitle || "Item Details",
+        downloadHeaders
+      );
+    } catch (error) {
+      console.error("Print failed:", error);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!downloadData || downloadData.length === 0) {
+      return;
+    }
+
+    try {
+      const { downloadData: downloadUtil } = await import('@/lib/detail-actions-utils');
+      await downloadUtil(
+        downloadData,
+        downloadFilename || "item-details",
+        downloadTitle || "Item Details",
+        "pdf",
+        downloadHeaders
+      );
+    } catch (error) {
+      console.error("Download failed:", error);
+    }
+  };
+
+  return (
+    <div className="flex space-x-2">
+      <Button variant="outline" size="sm" onClick={handlePrint}>
+        <Printer className="w-4 h-4 mr-2" />
+        Print
+      </Button>
+      <Button variant="outline" size="sm" onClick={handleDownload}>
+        <Download className="w-4 h-4 mr-2" />
+        Download
+      </Button>
+      {onEdit && (
+        <Button size="sm" onClick={onEdit}>
+          <Edit className="w-4 h-4 mr-2" />
+          Edit
+        </Button>
+      )}
+    </div>
+  );
+}
+
+```
+
+Let's update the useDetailActions hook:
+
+```tsx
+// hooks/useDetailActions.ts
+import { useState } from "react";
+import { printPDF, downloadData } from "@/lib/detail-actions-utils";
+import { ExportableItem } from "@/lib/export-utils";
+import { toast } from "sonner";
+
+export function useDetailActions() {
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handlePrint = async (
+    data: ExportableItem[],
+    filename: string,
+    title: string,
+    headers?: { [key: string]: string }
+  ) => {
+    if (data.length === 0) {
+      toast.warning("No data available for printing");
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      await printPDF(data, filename, title, headers);
+      toast.success("Print dialog opened");
+    } catch (error) {
+      console.error("Print failed:", error);
+      toast.error("Failed to open print dialog");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDownload = async (
+    data: ExportableItem[],
+    filename: string,
+    title: string,
+    format: "csv" | "pdf",
+    headers?: { [key: string]: string }
+  ) => {
+    if (data.length === 0) {
+      toast.warning("No data available for download");
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      await downloadData(data, filename, title, format, headers);
+      toast.success(`Data downloaded as ${format.toUpperCase()} successfully`);
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast.error(`Failed to download data as ${format.toUpperCase()}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return {
+    handlePrint,
+    handleDownload,
+    isProcessing,
+  };
+}
+
+```
+
+Finally, let's update the ItemDetailPage to use the updated components and hooks:
+
+```tsx
+// app/stock/item/[name]/page.tsx
+"use client";
+
+import { useState, useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Package,
+  ArrowLeft,
+  Edit,
+  FileText,
+} from "lucide-react";
+import { useItemQuery } from "@/hooks/data/useItemsQuery";
+import { useDetailActions } from "@/hooks/useDetailActions";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DetailHeaderActions } from "@/components/ui/detail-header-actions";
+import { toast } from "sonner";
+
+interface MovementHistoryItem {
+  id: string;
+  date: string;
+  type: string;
+  qty: number;
+  uom?: string;
+  reference?: string;
+}
+
+export default function ItemDetailPage() {
+  const router = useRouter();
+  const params = useParams<{ name: string }>();
+  const itemName = decodeURIComponent(params.name);
+
+  const { data: itemData, isLoading, error } = useItemQuery(itemName);
+  const [history] = useState<MovementHistoryItem[]>([]); // Placeholder for history
+  const { handlePrint, handleDownload, isProcessing } = useDetailActions();
+
+  const item = itemData?.item;
+
+  // Prepare data for export/download
+  const exportData = useMemo(() => {
+    if (!item) return [];
+
+    return [{
+      'Item Code': item.item_code,
+      'Item Name': item.item_name,
+      'Item Group': item.item_group,
+      'UOM': item.stock_uom,
+      'Brand': item.brand || '',
+      'Status': item.disabled ? 'Disabled' : 'Enabled',
+      'Is Stock Item': item.is_stock_item ? 'Yes' : 'No',
+      'Is Fixed Asset': item.is_fixed_asset ? 'Yes' : 'No',
+      'Description': item.description || '',
+      'Last Modified': new Date(item.modified).toLocaleString()
+    }];
+  }, [item]);
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background p-8 flex items-center justify-center">
+        <div className="text-center">
+          <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+          <h2 className="text-xl font-semibold mb-2">Error Loading Item</h2>
+          <p className="text-muted-foreground mb-4">
+            {error.message || "Something went wrong"}
+          </p>
+          <Button onClick={() => router.push("/stock/item")}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Items
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background p-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex items-center mb-8">
+            <Skeleton className="h-8 w-8 mr-3" />
+            <div>
+              <Skeleton className="h-8 w-48 mb-2" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-6">
+              <Skeleton className="h-64 rounded-lg" />
+              <Skeleton className="h-96 rounded-lg" />
+            </div>
+            <div>
+              <Skeleton className="h-80 rounded-lg" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!item) {
+    return (
+      <div className="min-h-screen bg-background p-8 flex items-center justify-center">
+        <div className="text-center">
+          <Package className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+          <h2 className="text-xl font-semibold mb-2">Item Not Found</h2>
+          <p className="text-muted-foreground mb-4">The item you're looking for doesn't exist.</p>
+          <Button onClick={() => router.push("/stock/item")}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Items
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const getStatusColor = (disabled?: number) => {
+    return disabled
+      ? "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400"
+      : "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
+  };
+
+  const getStatusText = (disabled?: number) => {
+    return disabled ? "Disabled" : "Enabled";
+  };
+
+  return (
+    <div className="min-h-screen bg-background p-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center">
+            <Button
+              variant="ghost"
+              onClick={() => router.push("/stock/item")}
+              className="mr-4"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold flex items-center">
+                <Package className="w-8 h-8 mr-3 text-primary" />
+                Item Details
+              </h1>
+              <p className="text-muted-foreground">View and manage item details</p>
+            </div>
+          </div>
+          <DetailHeaderActions
+            data={item}
+            downloadData={exportData}
+            downloadFilename={`item-${item.item_code}`}
+            downloadTitle={`${item.item_name} - Item Details`}
+            onEdit={() => router.push(`/stock/item/${encodeURIComponent(item.item_name)}/edit`)}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column - Details */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Basic Information */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Basic Information</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Item Code</p>
+                        <p className="font-medium text-lg">{item.item_code}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Item Name</p>
+                        <p className="font-medium">{item.item_name}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Status</p>
+                        <Badge className={getStatusColor(item.disabled)}>
+                          {getStatusText(item.disabled)}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Item Group</p>
+                        <p className="font-medium">{item.item_group}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Stock UOM</p>
+                        <p className="font-medium">{item.stock_uom}</p>
+                      </div>
+                      {item.brand && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Brand</p>
+                          <p className="font-medium">{item.brand}</p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-sm text-muted-foreground">Is Stock Item</p>
+                        <p className="font-medium">{item.is_stock_item ? "Yes" : "No"}</p>
+                      </div>
+                      {item.description && (
+                        <div>
+                          <p className="text-sm text-muted-foreground">Description</p>
+                          <p className="font-medium text-sm">{item.description}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Movement History */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Movement History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {history.length > 0 ? (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Change</TableHead>
+                          <TableHead>Reference</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {history.map((record) => (
+                          <TableRow key={record.id}>
+                            <TableCell>{record.date}</TableCell>
+                            <TableCell>{record.type}</TableCell>
+                            <TableCell>
+                              {record.type === "ISSUE" || record.type === "SELL"
+                                ? `-${record.qty}`
+                                : `+${record.qty}`} {record.uom || ""}
+                            </TableCell>
+                            <TableCell>{record.reference || ""}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Package className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>No movement history available for this item.</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right Column - Summary */}
+          <div>
+            {/* Summary Card */}
+            <Card className="sticky top-8">
+              <CardHeader>
+                <CardTitle>Item Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span>Item Code:</span>
+                    <span className="font-medium">{item.item_code}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Item Name:</span>
+                    <span className="font-medium">{item.item_name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Item Group:</span>
+                    <span>{item.item_group}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Stock UOM:</span>
+                    <span>{item.stock_uom}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Status:</span>
+                    <Badge className={getStatusColor(item.disabled)}>
+                      {getStatusText(item.disabled)}
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Is Stock Item:</span>
+                    <span>{item.is_stock_item ? "Yes" : "No"}</span>
+                  </div>
+                  {item.brand && (
+                    <div className="flex justify-between">
+                      <span>Brand:</span>
+                      <span>{item.brand}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t space-y-2">
+                  <Button variant="outline" className="w-full">
+                    <FileText className="w-4 h-4 mr-2" />
+                    View Stock Balance
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => handleDownload(
+                      exportData,
+                      `item-${item.item_code}`,
+                      `${item.item_name} - Item Details`,
+                      "pdf"
+                    )}
+                    disabled={isProcessing}
+                  >
+                    <FileText className="w-4 h-4 mr-2" />
+                    Download PDF
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+```
+
+With these changes, we've:
+
+1. Removed the share functionality from all components and utilities
+2. Updated the print functionality to generate and print a PDF instead of taking a screenshot
+3. Simplified the detail actions components to focus on print and download
+4. Updated the useDetailActions hook to remove share-related methods
+5. Modified the ItemDetailPage to use the updated components and hooks
+
+The print functionality now:
+
+- Generates a PDF using the same logic as the download functionality
+- Opens the PDF in a new window and triggers the print dialog
+- Falls back to downloading the PDF if popups are blocked
+
+This implementation ensures a consistent experience between the print and download functionalities, with both using the same PDF generation logic. The print button now directly prints the PDF version of the detail page, which provides a more professional and consistent output than a screenshot.
+
+Would you like me to explain any part of this implementation in more detail?
