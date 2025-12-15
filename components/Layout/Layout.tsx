@@ -71,6 +71,17 @@ const navigation = [
     ],
   },
   {
+    title: "Stock Settings",
+    icon: Settings,
+    items: [
+      {
+        title: "Item Prices",
+        href: "/stock/settings/item-price",
+        icon: Wallet,
+      },
+    ],
+  },
+  {
     title: "Manufacturing",
     icon: Factory,
     items: [
