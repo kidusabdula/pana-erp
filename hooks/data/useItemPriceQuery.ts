@@ -25,7 +25,7 @@ export function useItemPricesQuery(filters?: ItemPriceFilters) {
         params.append("valid", String(filters.valid));
 
       const response = await fetch(
-        `/api/stock/item-price?${params.toString()}`
+        `/api/stock/settings/item-price?${params.toString()}`
       );
       if (!response.ok) {
         const errorData = await response.json();
@@ -43,7 +43,7 @@ export function useItemPriceQuery(name: string) {
     queryKey: ["item-price", name],
     queryFn: async () => {
       const response = await fetch(
-        `/api/stock/item-price/${encodeURIComponent(name)}`
+        `/api/stock/settings/item-price/${encodeURIComponent(name)}`
       );
       if (!response.ok) {
         const errorData = await response.json();
@@ -61,7 +61,7 @@ export function useItemPriceOptionsQuery() {
   return useQuery({
     queryKey: ["item-price-options"],
     queryFn: async () => {
-      const response = await fetch("/api/stock/item-price/options");
+      const response = await fetch("/api/stock/settings/item-price/options");
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.details || "Failed to fetch options");
@@ -81,7 +81,7 @@ export function useCreateItemPriceMutation(options?: {
 
   return useMutation({
     mutationFn: async (data: ItemPriceCreateRequest) => {
-      const response = await fetch("/api/stock/item-price", {
+      const response = await fetch("/api/stock/settings/item-price", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -122,7 +122,7 @@ export function useUpdateItemPriceMutation(options?: {
       data: ItemPriceUpdateRequest;
     }) => {
       const response = await fetch(
-        `/api/stock/item-price?name=${encodeURIComponent(name)}`,
+        `/api/stock/settings/item-price?name=${encodeURIComponent(name)}`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -159,7 +159,7 @@ export function useDeleteItemPriceMutation() {
   return useMutation({
     mutationFn: async (name: string) => {
       const response = await fetch(
-        `/api/stock/item-price?name=${encodeURIComponent(name)}`,
+        `/api/stock/settings/item-price?name=${encodeURIComponent(name)}`,
         {
           method: "DELETE",
         }
