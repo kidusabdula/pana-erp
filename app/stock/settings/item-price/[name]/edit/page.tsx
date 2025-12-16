@@ -2,7 +2,7 @@
 // Pana ERP v1.3 - Edit Item Price (Premium Borderless Design)
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Form,
   FormControl,
@@ -46,7 +47,7 @@ import { cn } from "@/lib/utils";
 const itemPriceSchema = z.object({
   item_code: z.string().min(1, "Item is required"),
   price_list: z.string().min(1, "Price list is required"),
-  rate: z.coerce.number().min(0, "Rate must be positive"),
+  price_list_rate: z.coerce.number().min(0, "Rate must be positive"),
   uom: z.string().optional(),
   min_qty: z.coerce.number().optional(),
   packing_unit: z.coerce.number().optional(),
@@ -93,10 +94,23 @@ function DataField({
   );
 }
 
-export default function EditItemPricePage() {
+function LoadingSkeleton() {
+  return (
+    <div className="max-w-6xl mx-auto space-y-8 animate-pulse">
+      <div className="h-16 bg-muted/60 rounded-full" />
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="lg:col-span-8 space-y-6">
+          <div className="h-80 bg-muted/50 rounded-[2rem]" />
+          <div className="h-40 bg-muted/50 rounded-[2rem]" />
+        </div>
+        <div className="lg:col-span-4 h-60 bg-muted/40 rounded-[2rem]" />
+      </div>
+    </div>
+  );
+}
+
+function EditItemPriceContent({ priceName }: { priceName: string }) {
   const router = useRouter();
-  const params = useParams<{ name: string }>();
-  const priceName = decodeURIComponent(params.name);
 
   const { data: priceData, isLoading } = useItemPriceQuery(priceName);
   const { data: optionsData } = useItemPriceOptionsQuery();
@@ -125,7 +139,7 @@ export default function EditItemPricePage() {
       form.reset({
         item_code: price.item_code,
         price_list: price.price_list,
-        // rate: price.rate,
+        price_list_rate: price.price_list_rate,
         uom: price.uom || "",
         min_qty: price.min_qty,
         packing_unit: price.packing_unit,
@@ -159,7 +173,7 @@ export default function EditItemPricePage() {
     ? {
         item_code: price.item_code,
         price_list: price.price_list,
-        // rate: price.rate,
+        price_list_rate: price.price_list_rate,
         uom: price.uom || "",
         min_qty: price.min_qty,
         packing_unit: price.packing_unit,
@@ -178,18 +192,7 @@ export default function EditItemPricePage() {
     JSON.stringify(watchedValues) !== JSON.stringify(originalData);
 
   if (isLoading || !price) {
-    return (
-      <div className="max-w-6xl mx-auto space-y-8 animate-pulse">
-        <div className="h-16 bg-secondary/50 rounded-full" />
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-8 space-y-6">
-            <div className="h-80 bg-secondary/30 rounded-[2rem]" />
-            <div className="h-40 bg-secondary/30 rounded-[2rem]" />
-          </div>
-          <div className="lg:col-span-4 h-60 bg-secondary/20 rounded-[2rem]" />
-        </div>
-      </div>
-    );
+    return <LoadingSkeleton />;
   }
 
   return (
@@ -285,12 +288,12 @@ export default function EditItemPricePage() {
 
                   <FormField
                     control={form.control}
-                    name="rate"
+                    name="price_list_rate"
                     render={({ field }) => (
                       <FormItem>
                         <DataField
                           label="Rate *"
-                          error={form.formState.errors.rate?.message}
+                          error={form.formState.errors.price_list_rate?.message}
                         >
                           <div className="relative">
                             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-medium">
@@ -319,27 +322,19 @@ export default function EditItemPricePage() {
                         <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                           UOM
                         </FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          value={field.value}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="h-12 rounded-xl bg-secondary/30 hover:bg-secondary/50 focus:bg-white border-0">
-                              <SelectValue placeholder="Default UOM" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent className="rounded-2xl shadow-xl bg-white/95 backdrop-blur-xl border-0">
-                            {uoms.map((uom) => (
-                              <SelectItem
-                                key={uom}
-                                value={uom}
-                                className="rounded-xl"
-                              >
-                                {uom}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <FormControl>
+                          <SearchableSelect
+                            options={uoms.map((uom) => ({
+                              value: uom,
+                              label: uom,
+                            }))}
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder="Default UOM"
+                            searchPlaceholder="Search UOMs..."
+                            emptyText="No UOMs found."
+                          />
+                        </FormControl>
                       </FormItem>
                     )}
                   />
@@ -382,30 +377,22 @@ export default function EditItemPricePage() {
                             <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                               Customer
                             </FormLabel>
-                            <Select
-                              onValueChange={field.onChange}
-                              value={field.value}
-                            >
-                              <FormControl>
-                                <SelectTrigger className="h-12 rounded-xl bg-secondary/30 hover:bg-secondary/50 focus:bg-white border-0">
-                                  <SelectValue placeholder="All customers" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent className="rounded-2xl shadow-xl bg-white/95 backdrop-blur-xl border-0">
-                                <SelectItem value="" className="rounded-xl">
-                                  All customers
-                                </SelectItem>
-                                {customers.map((c) => (
-                                  <SelectItem
-                                    key={c}
-                                    value={c}
-                                    className="rounded-xl"
-                                  >
-                                    {c}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <FormControl>
+                              <SearchableSelect
+                                options={[
+                                  { value: "", label: "All customers" },
+                                  ...customers.map((c) => ({
+                                    value: c,
+                                    label: c,
+                                  })),
+                                ]}
+                                value={field.value}
+                                onValueChange={field.onChange}
+                                placeholder="All customers"
+                                searchPlaceholder="Search customers..."
+                                emptyText="No customers found."
+                              />
+                            </FormControl>
                           </FormItem>
                         )}
                       />
@@ -422,30 +409,22 @@ export default function EditItemPricePage() {
                             <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                               Supplier
                             </FormLabel>
-                            <Select
-                              onValueChange={field.onChange}
-                              value={field.value}
-                            >
-                              <FormControl>
-                                <SelectTrigger className="h-12 rounded-xl bg-secondary/30 hover:bg-secondary/50 focus:bg-white border-0">
-                                  <SelectValue placeholder="All suppliers" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent className="rounded-2xl shadow-xl bg-white/95 backdrop-blur-xl border-0">
-                                <SelectItem value="" className="rounded-xl">
-                                  All suppliers
-                                </SelectItem>
-                                {suppliers.map((s) => (
-                                  <SelectItem
-                                    key={s}
-                                    value={s}
-                                    className="rounded-xl"
-                                  >
-                                    {s}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <FormControl>
+                              <SearchableSelect
+                                options={[
+                                  { value: "", label: "All suppliers" },
+                                  ...suppliers.map((s) => ({
+                                    value: s,
+                                    label: s,
+                                  })),
+                                ]}
+                                value={field.value}
+                                onValueChange={field.onChange}
+                                placeholder="All suppliers"
+                                searchPlaceholder="Search suppliers..."
+                                emptyText="No suppliers found."
+                              />
+                            </FormControl>
                           </FormItem>
                         )}
                       />
@@ -642,5 +621,16 @@ export default function EditItemPricePage() {
         </form>
       </Form>
     </div>
+  );
+}
+
+export default function EditItemPricePage() {
+  const params = useParams<{ name: string }>();
+  const priceName = decodeURIComponent(params.name);
+
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <EditItemPriceContent priceName={priceName} />
+    </Suspense>
   );
 }

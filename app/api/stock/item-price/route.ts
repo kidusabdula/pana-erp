@@ -91,9 +91,13 @@ export async function POST(request: NextRequest) {
       const data: ItemPriceCreateRequest = await request.json();
 
       // Validation
-      if (!data.item_code || !data.price_list || data.rate === undefined) {
+      if (
+        !data.item_code ||
+        !data.price_list ||
+        data.price_list_rate === undefined
+      ) {
         throw new Error(
-          "Missing required fields: item_code, price_list, and rate"
+          "Missing required fields: item_code, price_list, and price_list_rate"
         );
       }
 

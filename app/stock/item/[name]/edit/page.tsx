@@ -67,13 +67,13 @@ import { cn } from "@/lib/utils";
 function LoadingSkeleton() {
   return (
     <div className="max-w-6xl mx-auto space-y-8 animate-pulse">
-      <div className="h-16 bg-secondary/50 rounded-full" />
+      <div className="h-16 bg-muted/60 rounded-full" />
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-8 space-y-6">
-          <div className="h-80 bg-secondary/30 rounded-[2rem]" />
-          <div className="h-40 bg-secondary/30 rounded-[2rem]" />
+          <div className="h-80 bg-muted/50 rounded-[2rem]" />
+          <div className="h-40 bg-muted/50 rounded-[2rem]" />
         </div>
-        <div className="lg:col-span-4 h-60 bg-secondary/20 rounded-[2rem]" />
+        <div className="lg:col-span-4 h-60 bg-muted/40 rounded-[2rem]" />
       </div>
     </div>
   );

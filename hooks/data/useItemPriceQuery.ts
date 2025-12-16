@@ -49,7 +49,7 @@ export function useItemPriceQuery(name: string) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Failed to fetch item price");
       }
-      return response.json() as Promise<{ item_price: ItemPrice }>;
+      return response.json() as Promise<{ data: { item_price: ItemPrice } }>;
     },
     enabled: !!name,
     staleTime: 60 * 1000,

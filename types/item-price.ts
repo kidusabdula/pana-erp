@@ -10,7 +10,7 @@ export interface ItemPrice {
   buying?: number;
   selling?: number;
   currency: string;
-  // rate: number;
+  price_list_rate: number; // Required - the actual rate/price
   uom?: string;
   packing_unit?: number;
   min_qty?: number;
@@ -32,7 +32,7 @@ export interface ItemPrice {
 export interface ItemPriceCreateRequest {
   item_code: string;
   price_list: string;
-  rate: number;
+  price_list_rate: number; // Required - the actual rate/price
   uom?: string;
   packing_unit?: number;
   min_qty?: number;

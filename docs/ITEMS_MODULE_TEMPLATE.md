@@ -354,7 +354,43 @@ export type ItemFormData = z.infer<typeof itemFormSchema>;
 ))}
 ```
 
-### 3. Premium Input Styling
+### 3. Loading Skeleton Pattern
+
+**✨ UPDATED (v1.3.1)**: Skeleton components now use more visible colors for better loading state feedback.
+
+```tsx
+function LoadingSkeleton() {
+  return (
+    <div className="max-w-6xl mx-auto space-y-8 animate-pulse">
+      {/* Header skeleton - most prominent */}
+      <div className="h-16 bg-muted/60 rounded-full" />
+      
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Main content skeletons */}
+        <div className="lg:col-span-8 space-y-6">
+          <div className="h-80 bg-muted/50 rounded-[2rem]" />
+          <div className="h-40 bg-muted/50 rounded-[2rem]" />
+        </div>
+        
+        {/* Sidebar skeleton - least prominent */}
+        <div className="lg:col-span-4 h-60 bg-muted/40 rounded-[2rem]" />
+      </div>
+    </div>
+  );
+}
+```
+
+**Key Changes:**
+- ❌ Old: `bg-secondary/50`, `bg-secondary/30`, `bg-secondary/20` (too subtle, hard to see)
+- ✅ New: `bg-muted/60`, `bg-muted/50`, `bg-muted/40` (more visible, better contrast)
+- Enhanced `Skeleton` component in `components/ui/skeleton.tsx` with shimmer effect
+
+**Color Hierarchy:**
+- Header/Primary: `bg-muted/60` (most visible)
+- Main Content: `bg-muted/50` (medium visibility)
+- Sidebar/Secondary: `bg-muted/40` (subtle but visible)
+
+### 4. Premium Input Styling
 
 ```tsx
 // Standard input classes
@@ -367,7 +403,7 @@ className="h-12 rounded-xl bg-secondary/30 hover:bg-secondary/50 focus:bg-white 
 className="rounded-2xl shadow-xl bg-white/95 backdrop-blur-xl border-0"
 ```
 
-### 4. Status Badges
+### 5. Status Badges
 
 ```tsx
 <div className={cn(
@@ -448,11 +484,229 @@ import { useModulesQuery, useModuleQuery, useCreateModuleMutation, useUpdateModu
 
 ---
 
+## Troubleshooting Common Issues
+
+### Issue 1: "Uncached data was accessed outside of Suspense" Error
+
+**Problem:** Next.js throws a blocking route error when `useParams()` or other data-fetching hooks are called outside of a `<Suspense>` boundary.
+
+**Error Message:**
+```
+Server Error: Route "/path/[param]": Uncached data was accessed outside of <Suspense>. 
+This delays the entire page from rendering, resulting in a slow user experience.
+```
+
+**Solution:** Move all data access (including `useParams()`) inside the Suspense boundary.
+
+**❌ Incorrect Pattern:**
+```tsx
+export default function DetailPage() {
+  const params = useParams<{ name: string }>();  // ❌ Outside Suspense
+  const itemName = decodeURIComponent(params.name);
+
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <DetailContent itemName={itemName} />
+    </Suspense>
+  );
+}
+```
+
+**✅ Correct Pattern:**
+```tsx
+function DetailContent() {
+  const params = useParams<{ name: string }>();  // ✅ Inside Suspense
+  const itemName = decodeURIComponent(params.name);
+  const { data, isLoading } = useItemQuery(itemName);
+  
+  if (isLoading || !data) return <LoadingSkeleton />;
+  
+  return <div>{/* content */}</div>;
+}
+
+export default function DetailPage() {
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <DetailContent />
+    </Suspense>
+  );
+}
+```
+
+**Key Points:**
+- Main component should only handle the Suspense wrapper
+- All hooks (`useParams`, `useRouter`, data queries) go inside the Suspense boundary
+- Loading skeleton shows while params and data are being fetched
+
+---
+
+### Issue 2: Data Fetched But Not Displayed (Stuck on Loading Skeleton)
+
+**Problem:** API successfully returns data (visible in network tab/Postman), but the page remains stuck showing the loading skeleton.
+
+**Root Cause:** Mismatch between the API response structure and what the component expects.
+
+**Common Scenario:**
+
+The `handleApiRequest` wrapper in `lib/api-template.ts` wraps all responses in this structure:
+```json
+{
+  "success": true,
+  "data": { /* your data here */ },
+  "message": "Request successful"
+}
+```
+
+**❌ Incorrect Hook Return Type:**
+```typescript
+export function useItemPriceQuery(name: string) {
+  return useQuery({
+    queryKey: ["item-price", name],
+    queryFn: async () => {
+      const response = await fetch(`/api/stock/item-price/${name}`);
+      // ❌ Missing the 'data' wrapper
+      return response.json() as Promise<{ item_price: ItemPrice }>;
+    },
+  });
+}
+```
+
+**❌ Incorrect Component Access:**
+```typescript
+const { data: priceData } = useItemPriceQuery(priceName);
+const price = priceData?.item_price;  // ❌ Undefined! Should be priceData?.data?.item_price
+```
+
+**✅ Correct Hook Return Type:**
+```typescript
+export function useItemPriceQuery(name: string) {
+  return useQuery({
+    queryKey: ["item-price", name],
+    queryFn: async () => {
+      const response = await fetch(`/api/stock/item-price/${name}`);
+      // ✅ Include the 'data' wrapper
+      return response.json() as Promise<{ data: { item_price: ItemPrice } }>;
+    },
+  });
+}
+```
+
+**✅ Correct Component Access:**
+```typescript
+const { data: priceData } = useItemPriceQuery(priceName);
+const price = priceData?.data?.item_price;  // ✅ Correct path
+```
+
+**Debugging Checklist:**
+1. ✅ Check browser DevTools Network tab - is the API returning data?
+2. ✅ Check the response structure - does it have a `data` wrapper?
+3. ✅ Check the hook's return type - does it match the actual response?
+4. ✅ Check component data access - are you using the correct path?
+5. ✅ Add `console.log(priceData)` to see what you're actually getting
+
+**Quick Test:**
+```typescript
+const { data: priceData, isLoading } = useItemPriceQuery(priceName);
+
+// Add this temporarily to debug
+console.log('Query State:', { priceData, isLoading });
+
+const price = priceData?.data?.item_price;
+```
+
+---
+
+## Additional Components
+
+### 5. SearchableSelect
+
+For dropdowns with many options (Items, Customers, Suppliers, etc.), use the searchable select component:
+
+```tsx
+import { SearchableSelect } from "@/components/ui/searchable-select";
+
+<SearchableSelect
+  options={items.map(item => ({
+    value: item.name,
+    label: item.item_name,
+    description: item.stock_uom, // Optional
+  }))}
+  value={selectedItem}
+  onValueChange={setSelectedItem}
+  placeholder="Select item..."
+  searchPlaceholder="Search items..."
+  emptyText="No items found."
+/>
+```
+
+### 6. Export Utilities
+
+The export system provides CSV and PDF export functionality:
+
+```tsx
+import { useExport } from "@/hooks/useExport";
+
+const { exportData, isExporting } = useExport();
+
+// In your handler
+const handleExport = async (format: "csv" | "pdf") => {
+  await exportData(
+    items,                    // Data array
+    "items-export",           // Filename (without extension)
+    "Items Report",           // PDF title
+    format,                   // "csv" or "pdf"
+    {                         // Optional header mapping
+      item_code: "Item Code",
+      item_name: "Item Name",
+    }
+  );
+};
+```
+
+---
+
+## Mutation Options Pattern
+
+For flexible mutation callbacks, use the generic MutationOptions pattern:
+
+```typescript
+interface MutationOptions<T> {
+  onSuccess?: (data: T) => void;
+  onError?: (error: Error) => void;
+}
+
+export function useCreateItemMutation(
+  options?: MutationOptions<{ data: { item: Item } }>
+) {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: async (data: ItemCreateRequest) => {
+      // ... fetch logic
+    },
+    onSuccess: (data) => {
+      toast.success("Created successfully");
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+      options?.onSuccess?.(data);  // Call custom callback
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+      options?.onError?.(error);   // Call custom callback
+    },
+  });
+}
+```
+
+---
+
 ## Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2024-12-14 | Initial template finalization |
+| 1.3.1 | 2024-12-15 | **Skeleton Visibility Update**: Changed loading skeleton colors from `bg-secondary` to `bg-muted` for better visibility. Updated base `Skeleton` component with shimmer effect. Applied to Item and Item Price modules. |
+| 1.3.2 | 2024-12-15 | **Critical Fixes & Troubleshooting**: Added troubleshooting section covering: (1) Suspense boundary errors with `useParams()` - moved data access inside Suspense boundaries, (2) API response structure mismatches - documented the `data` wrapper pattern from `handleApiRequest`. Fixed Item Price detail page loading issues. |
+| 1.3.3 | 2024-12-16 | **Template Refinement**: Added SearchableSelect component documentation, Export utilities pattern, MutationOptions generic pattern. Full codebase alignment verification completed. |
 
 ---
 

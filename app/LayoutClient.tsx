@@ -1,11 +1,23 @@
 "use client";
 
 import "@/app/globals.css";
+import { Suspense } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import Layout from "@/components/Layout/Layout";
 import { Toaster } from "sonner";
 import { getQueryClient } from "@/lib/query-client";
+
+function LoadingFallback() {
+  return (
+    <div className="flex items-center justify-center h-screen">
+      <div className="animate-pulse space-y-4 w-full max-w-3xl px-4">
+        <div className="h-12 bg-secondary/50 rounded-full" />
+        <div className="h-64 bg-secondary/30 rounded-3xl" />
+      </div>
+    </div>
+  );
+}
 
 export default function LayoutClient({
   children,
@@ -16,7 +28,9 @@ export default function LayoutClient({
   return (
     <>
       <QueryClientProvider client={queryClient}>
-        <Layout>{children}</Layout>
+        <Layout>
+          <Suspense fallback={<LoadingFallback />}>{children}</Suspense>
+        </Layout>
         <ReactQueryDevtools initialIsOpen={false} />
       </QueryClientProvider>
       <Toaster

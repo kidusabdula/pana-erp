@@ -18,34 +18,34 @@ export async function GET(request: NextRequest) {
             fields: ["name", "currency", "buying", "selling"],
             filters: [["enabled", "=", 1]],
             orderBy: { field: "name", order: "asc" },
-            limit: 100,
+            limit: 200,
           }),
           // Items for selection
           frappeClient.db.getDocList("Item", {
             fields: ["name", "item_name", "stock_uom"],
             filters: [["disabled", "=", 0]],
             orderBy: { field: "item_name", order: "asc" },
-            limit: 500,
+            limit: 1000,
           }),
           // Customers for customer-specific pricing
           frappeClient.db.getDocList("Customer", {
             fields: ["name"],
             filters: [["disabled", "=", 0]],
             orderBy: { field: "name", order: "asc" },
-            limit: 200,
+            limit: 500,
           }),
           // Suppliers for supplier-specific pricing
           frappeClient.db.getDocList("Supplier", {
             fields: ["name"],
             filters: [["disabled", "=", 0]],
             orderBy: { field: "name", order: "asc" },
-            limit: 200,
+            limit: 500,
           }),
           // UOMs
           frappeClient.db.getDocList("UOM", {
             fields: ["name"],
             orderBy: { field: "name", order: "asc" },
-            limit: 100,
+            limit: 0, // No limit - fetch all UOMs
           }),
         ]
       );

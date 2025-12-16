@@ -2,6 +2,7 @@
 // Pana ERP v1.3 - Item Price Detail (Premium Airy Design)
 "use client";
 
+import { Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   useItemPriceQuery,
@@ -89,15 +90,26 @@ function DataPoint({
   );
 }
 
-export default function ItemPriceDetailPage() {
+function LoadingSkeleton() {
+  return (
+    <div className="max-w-6xl mx-auto p-4 space-y-8 animate-pulse">
+      <div className="h-16 bg-muted/60 rounded-full" />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2 h-80 bg-muted/50 rounded-[2rem]" />
+        <div className="h-60 bg-muted/40 rounded-[2rem]" />
+      </div>
+    </div>
+  );
+}
+
+function ItemPriceDetailContent() {
   const router = useRouter();
   const params = useParams<{ name: string }>();
   const priceName = decodeURIComponent(params.name);
-
   const { data: priceData, isLoading } = useItemPriceQuery(priceName);
   const deleteMutation = useDeleteItemPriceMutation();
 
-  const price = priceData?.item_price;
+  const price = priceData?.data?.item_price;
 
   const isExpired =
     price?.valid_upto && new Date(price.valid_upto) < new Date();
@@ -105,15 +117,7 @@ export default function ItemPriceDetailPage() {
   const isSupplierSpecific = !!price?.supplier;
 
   if (isLoading || !price) {
-    return (
-      <div className="max-w-6xl mx-auto p-4 space-y-8 animate-pulse">
-        <div className="h-16 bg-secondary/50 rounded-full" />
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 h-80 bg-secondary/30 rounded-[2rem]" />
-          <div className="h-60 bg-secondary/20 rounded-[2rem]" />
-        </div>
-      </div>
-    );
+    return <LoadingSkeleton />;
   }
 
   const handleDelete = () => {
@@ -370,5 +374,13 @@ export default function ItemPriceDetailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ItemPriceDetailPage() {
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <ItemPriceDetailContent />
+    </Suspense>
   );
 }

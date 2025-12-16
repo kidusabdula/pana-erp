@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Form,
   FormControl,
@@ -45,7 +46,7 @@ import { cn } from "@/lib/utils";
 const itemPriceSchema = z.object({
   item_code: z.string().min(1, "Item is required"),
   price_list: z.string().min(1, "Price list is required"),
-  rate: z.coerce.number().min(0, "Rate must be positive"),
+  price_list_rate: z.coerce.number().min(0, "Rate must be positive"),
   uom: z.string().optional(),
   min_qty: z.coerce.number().optional(),
   packing_unit: z.coerce.number().optional(),
@@ -191,34 +192,20 @@ export default function NewItemPricePage() {
                         <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                           Item *
                         </FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          value={field.value}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="h-12 rounded-xl bg-secondary/30 hover:bg-secondary/50 focus:bg-white border-0 shadow-none">
-                              <SelectValue placeholder="Select item..." />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent className="rounded-2xl shadow-xl bg-white/95 backdrop-blur-xl border-0 max-h-[300px]">
-                            {items.map((item) => (
-                              <SelectItem
-                                key={item.name}
-                                value={item.name}
-                                className="rounded-xl"
-                              >
-                                <div className="flex flex-col">
-                                  <span className="font-medium">
-                                    {item.name}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {item.item_name}
-                                  </span>
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <FormControl>
+                          <SearchableSelect
+                            options={items.map((item) => ({
+                              value: item.name,
+                              label: item.name,
+                              description: item.item_name,
+                            }))}
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder="Select item..."
+                            searchPlaceholder="Search items..."
+                            emptyText="No items found."
+                          />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -265,12 +252,12 @@ export default function NewItemPricePage() {
 
                   <FormField
                     control={form.control}
-                    name="rate"
+                    name="price_list_rate"
                     render={({ field }) => (
                       <FormItem>
                         <DataField
                           label="Rate *"
-                          error={form.formState.errors.rate?.message}
+                          error={form.formState.errors.price_list_rate?.message}
                         >
                           <div className="relative">
                             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-medium">
@@ -297,27 +284,19 @@ export default function NewItemPricePage() {
                         <FormLabel className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                           UOM
                         </FormLabel>
-                        <Select
-                          onValueChange={field.onChange}
-                          value={field.value}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="h-12 rounded-xl bg-secondary/30 hover:bg-secondary/50 focus:bg-white border-0">
-                              <SelectValue placeholder="Default UOM" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent className="rounded-2xl shadow-xl bg-white/95 backdrop-blur-xl border-0">
-                            {uoms.map((uom) => (
-                              <SelectItem
-                                key={uom}
-                                value={uom}
-                                className="rounded-xl"
-                              >
-                                {uom}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <FormControl>
+                          <SearchableSelect
+                            options={uoms.map((uom) => ({
+                              value: uom,
+                              label: uom,
+                            }))}
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder="Default UOM"
+                            searchPlaceholder="Search UOMs..."
+                            emptyText="No UOMs found."
+                          />
+                        </FormControl>
                       </FormItem>
                     )}
                   />
@@ -565,7 +544,7 @@ export default function NewItemPricePage() {
                       </p>
                       <p className="font-bold text-xl text-primary tabular-nums">
                         {selectedPriceList?.currency || "$"}{" "}
-                        {watchedValues.rate || "0.00"}
+                        {watchedValues.price_list_rate || "0.00"}
                       </p>
                     </div>
                     <div className="bg-white/60 backdrop-blur-sm rounded-xl p-3">
