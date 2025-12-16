@@ -1,4 +1,4 @@
-// app/api/stock/item-price/route.ts
+// app/api/stock/settings/item-price/route.ts
 // Pana ERP - Item Price API Routes
 
 import { NextRequest } from "next/server";
@@ -13,7 +13,7 @@ import {
 // GET - Fetch all item prices
 export async function GET(request: NextRequest) {
   return handleApiRequest<{ item_prices: ItemPrice[] }>(
-    withEndpointLogging("/api/stock/item-price - GET")(async () => {
+    withEndpointLogging("/api/stock/settings/item-price - GET")(async () => {
       const { searchParams } = new URL(request.url);
 
       const itemCodeFilter = searchParams.get("item_code");
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
 // POST - Create a new item price
 export async function POST(request: NextRequest) {
   return handleApiRequest<{ item_price: ItemPrice }>(
-    withEndpointLogging("/api/stock/item-price - POST")(async () => {
+    withEndpointLogging("/api/stock/settings/item-price - POST")(async () => {
       const data: ItemPriceCreateRequest = await request.json();
 
       // Validation
@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
 // PUT - Update an existing item price
 export async function PUT(request: NextRequest) {
   return handleApiRequest<{ item_price: ItemPrice }>(
-    withEndpointLogging("/api/stock/item-price - PUT")(async () => {
+    withEndpointLogging("/api/stock/settings/item-price - PUT")(async () => {
       const { searchParams } = new URL(request.url);
       const name = searchParams.get("name");
 
@@ -152,7 +152,7 @@ export async function PUT(request: NextRequest) {
 // DELETE - Delete an item price
 export async function DELETE(request: NextRequest) {
   return handleApiRequest<{ message: string }>(
-    withEndpointLogging("/api/stock/item-price - DELETE")(async () => {
+    withEndpointLogging("/api/stock/settings/item-price - DELETE")(async () => {
       const { searchParams } = new URL(request.url);
       const name = searchParams.get("name");
 
