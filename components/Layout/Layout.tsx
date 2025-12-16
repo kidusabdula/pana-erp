@@ -79,6 +79,11 @@ const navigation = [
         href: "/stock/settings/item-price",
         icon: Wallet,
       },
+      {
+        title: "Item Groups",
+        href: "/stock/settings/item-group",
+        icon: Layers,
+      },
     ],
   },
   {
