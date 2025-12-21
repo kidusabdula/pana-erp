@@ -148,6 +148,23 @@ export default function SalesOrdersPage() {
     fetchData(false);
   };
 
+  // Helper to determine status based on Frappe fields
+  const getDerivedStatus = (order: SalesOrder) => {
+    if (order.docstatus === 0) return "Draft";
+    if (order.docstatus === 2) return "Cancelled";
+    
+    // If it's submitted (docstatus === 1)
+    const delivered = order.per_delivered || 0;
+    const billed = order.per_billed || 0;
+
+    if (delivered >= 100 && billed >= 100) return "Completed";
+    if (delivered < 100 && billed < 100) return "To Deliver and Bill";
+    if (delivered < 100) return "To Deliver";
+    if (billed < 100) return "To Bill";
+    
+    return "Submitted"; // Fallback
+  };
+
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
       case "draft":
@@ -155,8 +172,13 @@ export default function SalesOrdersPage() {
       case "submitted":
         return "bg-blue-100 text-blue-800";
       case "to deliver":
-        return "bg-yellow-100 text-yellow-800";
+      case "to deliver and bill":
+        return "bg-amber-100 text-amber-800";
+      case "to bill":
+        return "bg-orange-100 text-orange-800";
       case "delivered":
+        return "bg-green-100 text-green-800";
+      case "completed":
         return "bg-green-100 text-green-800";
       case "closed":
         return "bg-purple-100 text-purple-800";
@@ -168,6 +190,14 @@ export default function SalesOrdersPage() {
   };
 
   const filteredSalesOrders = salesOrders.filter((salesOrder) => {
+    // Override filters.status logic to check derived status
+    const derivedStatus = getDerivedStatus(salesOrder);
+    
+    // Status Filter
+    if (filters.status !== "all" && derivedStatus !== filters.status) {
+      return false;
+    }
+
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       return (
@@ -367,10 +397,10 @@ export default function SalesOrdersPage() {
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="Draft">Draft</SelectItem>
-                  <SelectItem value="Submitted">Submitted</SelectItem>
+                  <SelectItem value="To Deliver and Bill">To Deliver and Bill</SelectItem>
                   <SelectItem value="To Deliver">To Deliver</SelectItem>
-                  <SelectItem value="Delivered">Delivered</SelectItem>
-                  <SelectItem value="Closed">Closed</SelectItem>
+                  <SelectItem value="To Bill">To Bill</SelectItem>
+                  <SelectItem value="Completed">Completed</SelectItem>
                   <SelectItem value="Cancelled">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
@@ -478,8 +508,8 @@ export default function SalesOrdersPage() {
                         }).format(salesOrder.total)}
                       </TableCell>
                       <TableCell>
-                        <Badge className={getStatusColor(salesOrder.status)}>
-                          {salesOrder.status}
+                        <Badge className={getStatusColor(getDerivedStatus(salesOrder))}>
+                          {getDerivedStatus(salesOrder)}
                         </Badge>
                       </TableCell>
                       <TableCell>

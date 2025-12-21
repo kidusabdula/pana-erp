@@ -102,7 +102,9 @@ export async function POST(request: NextRequest) {
           qty,
           rate,
           amount,
-          doctype: "Sales Invoice Item"
+          doctype: "Sales Invoice Item",
+          sales_order: item.sales_order,
+          so_detail: item.so_detail
         };
       });
       

@@ -7,6 +7,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import Layout from "@/components/Layout/Layout";
 import { Toaster } from "sonner";
 import { getQueryClient } from "@/lib/query-client";
+import { ToastProvider } from "@/components/ui/toast";
 
 function LoadingFallback() {
   return (
@@ -28,9 +29,13 @@ export default function LayoutClient({
   return (
     <>
       <QueryClientProvider client={queryClient}>
-        <Layout>
-          <Suspense fallback={<LoadingFallback />}>{children}</Suspense>
-        </Layout>
+        <ToastProvider>
+           <Suspense fallback={<LoadingFallback />}>
+            <Layout>
+              {children}
+            </Layout>
+          </Suspense>
+        </ToastProvider>
         <ReactQueryDevtools initialIsOpen={false} />
       </QueryClientProvider>
       <Toaster

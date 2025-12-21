@@ -23,8 +23,10 @@ import {
   Share,
   DollarSign,
   Calendar,
-  User
+  User,
+  CheckCircle // Added CheckCircle
 } from "lucide-react";
+// ... imports
 import { useToast } from "@/components/ui/toast";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -39,6 +41,8 @@ interface SalesInvoice {
   docstatus: number;
   currency: string;
   company: string;
+  outstanding_amount: number;
+  paid_amount: number;
   items: Array<{
     item_code: string;
     item_name: string;
@@ -102,6 +106,40 @@ export default function SalesInvoiceDetailPage() {
         return 'bg-red-100 text-red-800';
       default:
         return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!invoice) return;
+    
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/accounting/sales/${params.name}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: invoice.name,
+          status: 'Submitted',
+          docstatus: 1
+        })
+      });
+      
+      if (!response.ok) throw new Error("Failed to submit invoice");
+      
+      const data = await response.json();
+      setInvoice(data.data.salesInvoice);
+      toast({
+        title: "Invoice Submitted",
+        description: `${invoice.name} has been submitted successfully.`
+      });
+    } catch (error) {
+       toast({
+        variant: "error",
+        title: "Error",
+        description: "Failed to submit invoice"
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -170,6 +208,25 @@ export default function SalesInvoiceDetailPage() {
             </div>
           </div>
           <div className="flex space-x-2">
+            {/* Submit Button (Draft Only) */}
+            {invoice?.docstatus === 0 && (
+                <Button onClick={handleSubmit} disabled={loading} variant="default">
+                <CheckCircle className="w-4 h-4 mr-2" />
+                {loading ? "Submitting..." : "Submit Invoice"}
+                </Button>
+            )}
+
+            {/* Create Payment Button (Submitted/Overdue Only) */}
+            {invoice?.docstatus === 1 && invoice?.status !== 'Paid' && invoice?.status !== 'Cancelled' && (
+                <Button 
+                  onClick={() => router.push(`/accounting/payments/new?payment_type=Receive&party_type=Customer&party=${invoice.customer}`)} 
+                  variant="default"
+                >
+                <DollarSign className="w-4 h-4 mr-2" />
+                Create Payment
+                </Button>
+            )}
+
             <Button variant="outline" size="sm">
               <Printer className="w-4 h-4 mr-2" />
               Print
@@ -310,6 +367,14 @@ export default function SalesInvoiceDetailPage() {
                       <span>Total</span>
                       <span>{formatCurrency(invoice.grand_total)}</span>
                     </div>
+                  </div>
+                  <div className="flex justify-between text-sm text-green-600">
+                    <span>Paid Amount</span>
+                    <span>{formatCurrency(invoice.paid_amount || 0)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-red-600 font-semibold">
+                    <span>Outstanding</span>
+                    <span>{formatCurrency(invoice.outstanding_amount)}</span>
                   </div>
                 </div>
 

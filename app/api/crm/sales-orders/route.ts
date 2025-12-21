@@ -60,6 +60,9 @@ export async function GET(request: NextRequest) {
                 delivery_date: doc.delivery_date,
                 total: doc.total,
                 status: doc.status,
+                docstatus: doc.docstatus,
+                per_delivered: doc.per_delivered || 0,
+                per_billed: doc.per_billed || 0,
                 items: doc.items || [],
                 creation: doc.creation,
                 modified: doc.modified,
@@ -135,6 +138,7 @@ export async function POST(request: NextRequest) {
           ...item,
           parentfield: "items",
         })),
+        company: data.company || "Ma Beignet (Demo)", // Default company if not provided
       };
 
       // Use frappe.client.insert to create the document
@@ -167,6 +171,9 @@ export async function POST(request: NextRequest) {
         delivery_date: doc.delivery_date,
         total: doc.total,
         status: doc.status,
+        docstatus: doc.docstatus,
+        per_delivered: doc.per_delivered || 0,
+        per_billed: doc.per_billed || 0,
         items: doc.items || [],
         creation: doc.creation,
         modified: doc.modified,
@@ -174,6 +181,71 @@ export async function POST(request: NextRequest) {
       };
 
       return { salesOrder };
+    }),
+    { requireAuth: true }
+  );
+}
+// PUT - Update a sales order (specifically for submission)
+export async function PUT(request: NextRequest) {
+  return handleApiRequest<{ salesOrder: SalesOrder }>(
+    withEndpointLogging("/api/crm/sales-orders - PUT")(async () => {
+      const data = await request.json();
+
+      if (!data.name) {
+        throw new Error("Sales Order name is required");
+      }
+
+      if (data.status === "Submitted" || data.docstatus === 1) {
+        // Submit the document
+        // First fetch the latest version to ensure we have the correct modified timestamp
+        const currentDoc = await frappeClient.call.get("frappe.client.get", {
+          doctype: "Sales Order",
+          name: data.name,
+        });
+
+        if (!currentDoc.message) {
+          throw new Error("Sales Order not found");
+        }
+
+        const result = await frappeClient.call.post("frappe.client.submit", {
+          doc: currentDoc.message,
+        });
+
+        if (!result.message) {
+          throw new Error("Failed to submit sales order");
+        }
+
+        // Fetch the updated document
+        const updatedDoc = await frappeClient.call.get("frappe.client.get", {
+          doctype: "Sales Order",
+          name: data.name,
+        });
+
+        if (!updatedDoc.message) {
+          throw new Error("Failed to fetch updated sales order");
+        }
+
+        const doc = updatedDoc.message;
+        const salesOrder: SalesOrder = {
+          name: doc.name,
+          customer: doc.customer,
+          transaction_date: doc.transaction_date,
+          delivery_date: doc.delivery_date,
+          total: doc.total,
+          status: doc.status,
+          docstatus: doc.docstatus,
+          per_delivered: doc.per_delivered || 0,
+          per_billed: doc.per_billed || 0,
+          items: doc.items || [],
+          creation: doc.creation,
+          modified: doc.modified,
+          owner: doc.owner,
+        };
+
+        return { salesOrder };
+      }
+
+      throw new Error("Invalid update request");
     }),
     { requireAuth: true }
   );

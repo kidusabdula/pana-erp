@@ -67,6 +67,7 @@ interface CRMOptions {
     standard_rate: number;
     is_stock_item: number;
   }>;
+  companies: Array<{ name: string; company_name: string }>;
 }
 
 export default function NewSalesOrderContent() {
@@ -91,6 +92,7 @@ export default function NewSalesOrderContent() {
       .toISOString()
       .split("T")[0], // 7 days from now
     currency: "ETB",
+    company: "Ma Beignet (Demo)", // Default
   });
 
   const [items, setItems] = useState<SalesOrderItem[]>([]);
@@ -331,6 +333,26 @@ export default function NewSalesOrderContent() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="company">Company</Label>
+                  <Select
+                    value={formData.company}
+                    onValueChange={(value) => handleInputChange("company", value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Company" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {options?.companies?.map((company) => (
+                        <SelectItem key={company.name} value={company.name}>
+                          {company.company_name}
+                        </SelectItem>
+                      )) || (
+                         <SelectItem value="Ma Beignet (Demo)">Ma Beignet (Demo)</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div>
                   <Label htmlFor="customer">Customer *</Label>
                   <Select

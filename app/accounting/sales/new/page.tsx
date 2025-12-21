@@ -44,7 +44,9 @@ interface SalesInvoiceItem {
   rate: number;
   amount: number;
   uom: string;
-  warehouse: string;
+   warehouse: string;
+  sales_order?: string;
+  so_detail?: string;
 }
 
 interface AccountingOptions {
@@ -62,9 +64,13 @@ interface AccountingOptions {
   warehouses: Array<{ name: string; warehouse_name: string }>;
 }
 
-export default function NewSalesInvoicePage() {
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+
+function NewSalesInvoiceContent() {
   const { push: toast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [options, setOptions] = useState<AccountingOptions | null>(null);
@@ -96,6 +102,60 @@ export default function NewSalesInvoicePage() {
     fetchOptions();
   }, []);
 
+  const salesOrderParam = searchParams.get('sales_order');
+
+  useEffect(() => {
+    if (salesOrderParam) {
+      fetchSalesOrderDetails(salesOrderParam);
+    }
+  }, [salesOrderParam]);
+
+  const fetchSalesOrderDetails = async (soName: string) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/crm/sales-orders/${soName}`);
+      if (!response.ok) throw new Error("Failed to fetch Sales Order");
+      const result = await response.json();
+      const so = result.data.salesOrder;
+
+      // Populate form
+      setFormData(prev => ({
+        ...prev,
+        customer: so.customer,
+        currency: so.currency || "ETB",
+        // sales_order: so.name, // If we want to link the header too
+      }));
+
+      // Populate items
+      setItems(so.items.map((item: any) => ({
+        item_code: item.item_code,
+        item_name: item.item_name,
+        description: item.description,
+        qty: item.qty - (item.billed_qty || 0), // Remaining qty
+        rate: item.rate,
+        amount: (item.qty - (item.billed_qty || 0)) * item.rate,
+        uom: "Nos", // Default
+        warehouse: "", // Will need selection or default
+        sales_order: so.name,
+        so_detail: item.name
+      })).filter((item: any) => item.qty > 0)); // Only unbilled items
+      
+      toast({
+         title: "Loaded Sales Order",
+         description: `Loaded details from ${so.name}`
+      });
+
+    } catch (error) {
+       toast({
+        variant: "error",
+        title: "Error",
+        description: "Failed to load Sales Order details"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (options && itemSearchQuery) {
       const query = itemSearchQuery.toLowerCase();
@@ -122,7 +182,11 @@ export default function NewSalesInvoicePage() {
         
         // Set default warehouse if available
         if (data.data.options.warehouses.length > 0) {
-          setNewItem(prev => ({ ...prev, warehouse: data.data.options.warehouses[0].name }));
+          const defaultWarehouse = data.data.options.warehouses[0].name;
+          setNewItem(prev => ({ ...prev, warehouse: defaultWarehouse }));
+          
+          // Also update any pre-filled items that might have empty warehouse
+          setItems(prev => prev.map(item => item.warehouse ? item : { ...item, warehouse: defaultWarehouse }));
         }
       }
     } catch (error) {
@@ -607,5 +671,13 @@ export default function NewSalesInvoicePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function NewSalesInvoicePage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <NewSalesInvoiceContent />
+    </Suspense>
   );
 }
