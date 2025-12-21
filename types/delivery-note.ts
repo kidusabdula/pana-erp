@@ -10,6 +10,7 @@ export interface DeliveryNoteItem {
     batch_no?: string;
     serial_no?: string;
     against_sales_order?: string;
+    so_detail?: string;
     idx?: number;
   }
   

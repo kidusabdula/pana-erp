@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 interface DeliveryNoteItemForm {
   item_code: string;
@@ -47,6 +47,7 @@ interface DeliveryNoteItemForm {
   batch_no?: string;
   serial_no?: string;
   against_sales_order?: string;
+  so_detail?: string;
 }
 
 interface DropdownOptions {
@@ -95,6 +96,58 @@ export default function AddDeliveryNotePage({ postingDate, postingTime }: AddDel
   useEffect(() => {
     fetchOptions();
   }, []);
+
+  const searchParams = useSearchParams();
+  const salesOrderParam = searchParams.get('sales_order');
+
+  useEffect(() => {
+    if (salesOrderParam) {
+      fetchSalesOrderDetails(salesOrderParam);
+    }
+  }, [salesOrderParam]);
+
+  const fetchSalesOrderDetails = async (soName: string) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/crm/sales-orders/${soName}`);
+      if (!response.ok) throw new Error("Failed to fetch Sales Order");
+      const result = await response.json();
+      const so = result.data.salesOrder;
+
+      // Populate form
+      setFormData(prev => ({
+        ...prev,
+        customer: so.customer,
+        sales_order: so.name,
+        company: "Pana ERP", // Default or from SO if available
+        items: so.items.map((item: any) => ({
+          item_code: item.item_code,
+          item_name: item.item_name,
+          qty: item.qty - (item.delivered_qty || 0), // Pre-fill with remaining qty
+          uom: "Nos", // Default or fetch
+          rate: item.rate,
+          amount: (item.qty - (item.delivered_qty || 0)) * item.rate,
+          warehouse: prev.set_warehouse,
+          against_sales_order: so.name,
+          so_detail: item.name
+        })).filter((item: any) => item.qty > 0) // Only items with remaining qty
+      }));
+      
+      toast({
+        title: "Loaded Sales Order",
+        description: `Loaded details from ${so.name}`
+      });
+
+    } catch (error) {
+       toast({
+        variant: "error",
+        title: "Error",
+        description: "Failed to load Sales Order details"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (options && itemSearchQuery) {

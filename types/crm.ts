@@ -104,7 +104,10 @@ export interface SalesOrder {
   delivery_date: string;
   currency?: string;
   total: number;
-  status: "Draft" | "Submitted" | "To Deliver" | "Delivered" | "Closed";
+  status: "Draft" | "Submitted" | "To Deliver" | "Delivered" | "Closed" | "To Bill" | "To Deliver and Bill" | "Completed" | "Cancelled";
+  docstatus: 0 | 1 | 2;
+  per_delivered: number;
+  per_billed: number;
   items: SalesOrderItem[];
   creation: string;
   modified: string;
@@ -118,6 +121,8 @@ export interface SalesOrderItem {
   qty: number;
   rate: number;
   amount: number;
+  delivered_qty?: number;
+  billed_qty?: number;
 }
 
 export interface Communication {
