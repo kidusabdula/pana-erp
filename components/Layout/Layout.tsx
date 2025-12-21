@@ -141,6 +141,7 @@ const navigation = [
       { title: "Opportunities", href: "/crm/opportunities", icon: TrendingUp },
       { title: "Quotations", href: "/crm/quotations", icon: FileText },
       { title: "Sales Orders", href: "/crm/sales-orders", icon: ShoppingCart },
+      { title: "Purchase Orders", href: "/crm/purchase-orders", icon: ShoppingCart },
       { title: "Activities", href: "/crm/activities", icon: ClipboardList },
       {
         title: "Communications",

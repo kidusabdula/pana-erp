@@ -132,6 +132,8 @@ export async function POST(request: NextRequest) {
           rate,
           amount,
           doctype: "Purchase Invoice Item",
+          purchase_order: item.purchase_order,
+          po_detail: item.po_detail,
         };
       });
 

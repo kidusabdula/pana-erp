@@ -20,6 +20,7 @@ interface CRMOptions {
     standard_rate: number;
     is_stock_item: number;
   }>;
+  companies: Array<{ name: string; company_name: string }>;
 }
 
 export async function GET() {
@@ -104,6 +105,13 @@ export async function GET() {
         limit: 100,
       });
 
+      // Fetch companies
+      const companies = await frappeClient.call.get("frappe.client.get_list", {
+        doctype: "Company",
+        fields: ["name", "company_name"],
+        limit: 20,
+      });
+
       // Process the data
       const processedTerritories =
         territories.message?.map((territory: any) => ({
@@ -158,6 +166,12 @@ export async function GET() {
           is_stock_item: item.is_stock_item || 0,
         })) || [];
 
+      const processedCompanies =
+        companies.message?.map((comp: any) => ({
+          name: comp.name,
+          company_name: comp.company_name,
+        })) || [];
+
       const options: CRMOptions = {
         territories: processedTerritories,
         salesPersons: processedSalesPersons,
@@ -167,6 +181,7 @@ export async function GET() {
         customers: processedCustomers,
         leads: processedLeads,
         items: processedItems,
+        companies: processedCompanies,
       };
 
       return { options };

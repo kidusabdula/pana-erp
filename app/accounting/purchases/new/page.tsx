@@ -1,7 +1,7 @@
 // app/accounting/purchases/new/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,8 +33,7 @@ import {
   Search
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { motion } from "framer-motion";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 interface PurchaseItem {
   item_code: string;
@@ -43,6 +42,9 @@ interface PurchaseItem {
   qty: number;
   rate: number;
   amount: number;
+  // Link fields
+  purchase_order?: string;
+  po_detail?: string;
 }
 
 interface AccountingOptions {
@@ -59,10 +61,13 @@ interface AccountingOptions {
   }>;
 }
 
-export default function NewPurchasePage() {
+function NewPurchaseContent() {
   const { push: toast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  
   const [loading, setLoading] = useState(false);
+  const [fetchingPO, setFetchingPO] = useState(false);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [options, setOptions] = useState<AccountingOptions | null>(null);
   const [itemSearchQuery, setItemSearchQuery] = useState("");
@@ -91,6 +96,65 @@ export default function NewPurchasePage() {
   useEffect(() => {
     fetchOptions();
   }, []);
+
+  // Deep Linking from Purchase Order
+  useEffect(() => {
+    const poName = searchParams.get('purchase_order');
+    if (poName) {
+      fetchPurchaseOrderDetails(poName);
+    }
+  }, [searchParams]);
+
+  const fetchPurchaseOrderDetails = async (poName: string) => {
+    setFetchingPO(true);
+    try {
+      const res = await fetch(`/api/purchasing/purchase-orders?name=${poName}`);
+      const data = await res.json();
+      
+      if (data.data?.purchaseOrders?.length > 0) {
+        const po = data.data.purchaseOrders.find((p: any) => p.name === poName) || data.data.purchaseOrders[0];
+        
+        setFormData(prev => ({
+          ...prev,
+          supplier: po.supplier,
+          company: po.company,
+          currency: po.currency,
+        }));
+        
+        // Pre-fill Items
+        const mappedItems = po.items.map((item: any) => {
+           const remainingQty = item.qty - (item.billed_qty || 0);
+           if (remainingQty <= 0) return null;
+           
+           return {
+             item_code: item.item_code,
+             item_name: item.item_name || item.item_code,
+             description: item.description || "",
+             qty: remainingQty,
+             rate: item.rate,
+             amount: remainingQty * item.rate,
+             purchase_order: po.name,
+             po_detail: item.name
+           } as PurchaseItem;
+        }).filter((item: any) => item !== null);
+        
+        setItems(mappedItems);
+        
+         toast({
+          title: "Data Loaded",
+          description: `Loaded details from ${po.name}`
+        });
+      }
+    } catch (error) {
+       toast({
+        variant: "error",
+        title: "Error",
+        description: "Failed to load Purchase Order details"
+      });
+    } finally {
+      setFetchingPO(false);
+    }
+  };
 
   useEffect(() => {
     if (options && itemSearchQuery) {
@@ -148,7 +212,7 @@ export default function NewPurchasePage() {
   };
 
   const addItem = () => {
-    if (!newItem.item_code || !newItem.item_name || newItem.rate <= 0) {
+    if (!newItem.item_code || !newItem.item_name || newItem.rate < 0) {
       toast({
         variant: "error",
         title: "Error",
@@ -223,7 +287,14 @@ export default function NewPurchasePage() {
         description: `Purchase invoice ${data.data.purchase.name} created successfully`
       });
 
-      router.push('/accounting/purchases');
+      // If created from PO, navigate back to PO
+      const fromPO = searchParams.get('purchase_order');
+      if (fromPO) {
+        router.push(`/purchasing/purchase-orders/${fromPO}`);
+      } else {
+        router.push('/accounting/purchases');
+      }
+      
     } catch (error: unknown) {
       toast({
         variant: "error",
@@ -255,7 +326,7 @@ export default function NewPurchasePage() {
         <div className="flex items-center">
           <Button 
             variant="ghost" 
-            onClick={() => router.push('/accounting/purchases')}
+            onClick={() => router.back()}
             className="mr-4"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -271,7 +342,7 @@ export default function NewPurchasePage() {
         </div>
         <Button 
           onClick={handleSubmit} 
-          disabled={loading}
+          disabled={loading || fetchingPO}
           className="flex items-center"
         >
           <Save className="w-4 h-4 mr-2" />
@@ -313,6 +384,7 @@ export default function NewPurchasePage() {
                   <Select
                     value={formData.supplier}
                     onValueChange={(value) => handleInputChange('supplier', value)}
+                    disabled={!!searchParams.get('purchase_order')} // Disable if linked
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select Supplier" />
@@ -471,7 +543,7 @@ export default function NewPurchasePage() {
               </div>
 
               {/* Items Table */}
-              {items.length > 0 && (
+              {items.length > 0 ? (
                 <div className="rounded-md border">
                   <Table>
                     <TableHeader>
@@ -529,7 +601,9 @@ export default function NewPurchasePage() {
                     </TableBody>
                   </Table>
                 </div>
-              )}
+              ) : fetchingPO ? (
+                  <div className="text-center py-8 text-muted-foreground">Loading items from Purchase Order...</div>
+              ) : null}
             </CardContent>
           </Card>
         </div>
@@ -588,5 +662,13 @@ export default function NewPurchasePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function NewPurchasePage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <NewPurchaseContent />
+    </Suspense>
   );
 }

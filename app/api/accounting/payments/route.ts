@@ -1,173 +1,171 @@
-// app/api/accounting/payments/route.ts
 import { NextRequest } from "next/server";
 import { frappeClient } from "@/lib/frappe-client";
 import { handleApiRequest, withEndpointLogging } from "@/lib/api-template";
-import { PaymentEntry } from "@/types/accounting";
-import { Filter } from "frappe-js-sdk/lib/db/types";
+import { PaymentEntry } from "@/types/payment";
 
-// GET - Fetch payment entries
 export async function GET(request: NextRequest) {
-  return handleApiRequest<{ payments: PaymentEntry[] }>(
+  return handleApiRequest(
     withEndpointLogging("/api/accounting/payments - GET")(async () => {
       const { searchParams } = new URL(request.url);
-      const limit = searchParams.get("limit") || "100";
-      const paymentType = searchParams.get("payment_type");
-      const partyType = searchParams.get("party_type");
-      const status = searchParams.get("status");
+      const action = searchParams.get("action");
 
-      const filters: Filter[] = [];
-      if (paymentType) filters.push(["payment_type", "=", paymentType]);
-      if (partyType) filters.push(["party_type", "=", partyType]);
-      if (status) filters.push(["status", "=", status]);
+      if (action === "get_outstanding_invoices") {
+          const partyType = searchParams.get("party_type");
+          const party = searchParams.get("party");
 
-      const payments = await frappeClient.db.getDocList<PaymentEntry>(
+          if (!partyType || !party) throw new Error("Party Type and Party are required");
+
+          const doctype = partyType === "Customer" ? "Sales Invoice" : "Purchase Invoice";
+          const accountField = partyType === "Customer" ? "debit_to" : "credit_to";
+
+          const invoices = await frappeClient.db.getDocList(doctype, {
+              fields: ["name", "posting_date", "grand_total", "outstanding_amount", "currency", accountField],
+              filters: [
+                  [partyType.toLowerCase(), "=", party],
+                  ["docstatus", "=", 1],
+                  ["outstanding_amount", ">", 0]
+              ]
+          });
+          
+          // Map backend specific account fields to generic 'party_account' for frontend
+          const mappedInvoices = invoices.map((inv: any) => ({
+             ...inv,
+             party_account: inv[accountField]
+          }));
+
+          return { invoices: mappedInvoices };
+      }
+
+      if (action === "get_payment_modes") {
+          const modes = await frappeClient.db.getDocList("Mode of Payment", {
+              fields: ["name", "type"]
+          });
+          return { modes };
+      }
+
+      if (action === "get_parties") {
+        const partyType = searchParams.get("party_type");
+        if (!partyType) throw new Error("Party Type required");
+
+        const doctype = partyType; // "Customer" or "Supplier"
+        const nameField = partyType === "Customer" ? "customer_name" : "supplier_name";
+        
+        const parties = await frappeClient.db.getDocList(doctype, {
+            fields: ["name", nameField],
+            orderBy: { field: "creation", order: "desc" },
+            limit: 1000
+        });
+        return { parties };
+      }
+
+      // Default: List Payments
+      const limit = parseInt(searchParams.get("limit") || "100");
+      const paymentNames = await frappeClient.db.getDocList<{ name: string }>(
         "Payment Entry",
         {
-          fields: [
-            "name",
-            "payment_type",
-            "party_type",
-            "party",
-            "posting_date",
-            //"amount",
-            "reference_no",
-            "reference_date",
-            "status",
-            //"payment_method",
-          ],
-          filters: filters.length > 0 ? filters : undefined,
+          fields: ["name"],
           orderBy: { field: "posting_date", order: "desc" },
-          limit: parseInt(limit),
+          limit,
         }
+      );
+      
+      const payments = await Promise.all(
+          paymentNames.map(async (p) => {
+              const doc = await frappeClient.db.getDoc<any>("Payment Entry", p.name);
+              return {
+                  name: doc.name,
+                  payment_type: doc.payment_type,
+                  party_type: doc.party_type,
+                  party: doc.party,
+                  posting_date: doc.posting_date,
+                  paid_amount: doc.paid_amount,
+                  docstatus: doc.docstatus,
+                  company: doc.company
+              } as PaymentEntry;
+          })
       );
 
       return { payments };
-    })
+    }),
+    { requireAuth: true }
   );
 }
-
-
-// POST - Create new payment entry
 
 export async function POST(request: NextRequest) {
   return handleApiRequest<{ payment: PaymentEntry }>(
     withEndpointLogging("/api/accounting/payments - POST")(async () => {
       const data = await request.json();
 
-      // Validate required fields
-      const requiredFields = ["payment_type", "party_type", "party", "posting_date", "amount", "company", "paid_from", "paid_to"];
-      const missingFields = requiredFields.filter((f) => !data[f]);
-      if (missingFields.length) {
-        throw new Error(
-          `Missing required fields: ${missingFields.join(", ")}`
-        );
+      // Required fields validation
+      if (!data.payment_type || !data.party_type || !data.party || !data.paid_amount) {
+          throw new Error("Missing required fields");
       }
 
-      // Build full Payment Entry document for one-step insert
-      const paymentDoc = {
-        doctype: "Payment Entry",
-        payment_type: data.payment_type,              // "Receive" or "Pay"
-        party_type: data.party_type,                  // "Customer", "Supplier", etc.
-        party: data.party,
-        posting_date: data.posting_date,
-        company: data.company,
-        paid_amount: data.amount,                     // MANDATORY
-        ...(data.payment_type === "Receive" ? { received_amount: data.amount } : {}),
-        paid_from: data.paid_from,                   // GL account
-        paid_to: data.paid_to,                       // GL account
-        paid_from_account_currency: data.paid_from_account_currency || "ETB",
-        paid_to_account_currency: data.paid_to_account_currency || "ETB",
-        source_exchange_rate: data.source_exchange_rate || 1,
-        target_exchange_rate: data.target_exchange_rate || 1,
-        mode_of_payment: data.payment_method,
-        reference_no: data.reference_no || "",
-        reference_date: data.reference_date || data.posting_date,
-        docstatus: 0
+      // Prepare References Table
+      const references = data.references?.map((ref: any) => ({
+          reference_doctype: ref.reference_doctype,
+          reference_name: ref.reference_name,
+          allocated_amount: ref.allocated_amount
+      })) || [];
+
+      // Determine Accounts (simplified logic, ideally user selects specific accounts)
+      // For now, we rely on ERPNext default account determination or simplistic defaults if not provided
+      // If user provides paid_to/paid_from, use them.
+      
+      const newPayment: any = {
+          doctype: "Payment Entry",
+          payment_type: data.payment_type,
+          party_type: data.party_type,
+          party: data.party,
+          posting_date: data.posting_date || new Date().toISOString().split('T')[0],
+          mode_of_payment: data.mode_of_payment || "Cash",
+          paid_amount: data.paid_amount,
+          received_amount: data.paid_amount, // Assuming 1:1 for simplicity unless exchange rate involved
+          source_exchange_rate: 1,
+          target_exchange_rate: 1,
+          references: references,
+          company: data.company || "Pana ERP"
+          // account paid to/from will be handled by ERPNext defaults if not set, or we must fetch defaults.
+          // For Cash, it needs a Cash Account.
       };
 
-      // Insert the Payment Entry in one step
-      const createResult = await frappeClient.call.post("frappe.client.insert", {
-        doc: paymentDoc
-      });
-
-      if (!createResult.message || !createResult.message.name) {
-        throw new Error("Failed to create payment entry");
-      }
-
-      // Fetch the complete Payment Entry after creation
-      const payment = await frappeClient.db.getDoc<PaymentEntry>(
-        "Payment Entry",
-        createResult.message.name
-      );
-
-      return { payment };
-    })
-  );
-}
-// PUT - Update payment entry
-export async function PUT(request: NextRequest) {
-  return handleApiRequest<{ payment: PaymentEntry }>(
-    withEndpointLogging("/api/accounting/payments - PUT")(async () => {
-      const { searchParams } = new URL(request.url);
-      const name = searchParams.get("name");
-      if (!name) throw new Error("Payment name parameter is required");
+      // If mode is Cash and no account provided, let's try to let ERPNext handle it or we might error.
+      // ERPNext usually requires `paid_from` (for Pay) or `paid_to` (for Receive).
+      // We will add specific logic in UI to fetch 'Cash' or 'Bank' accounts and pass them.
       
-      // Get the full document first
-      const currentDoc = await frappeClient.call.get("frappe.client.get", {
-        doctype: "Payment Entry",
-        name: name
-      });
-      
-      if (!currentDoc || !currentDoc.message) {
-        throw new Error("Payment entry not found");
+      // Map party_account to proper field based on type
+      if (data.payment_type === "Receive") {
+          // Customer paying us
+          if (data.party_account) newPayment.paid_from = data.party_account;
+          
+          // Destination defaults to Cash if not provided
+          if (!newPayment.paid_to) {
+             // Ideally fetch default company/mode account. 
+             // Using a safe Fallback like "Cash - PP" or similar if known, 
+             // but lacking that, we rely on user input or fetch.
+             // For now, if "paid_to" missing, defaulting to the Company default
+             // or letting ERPNext error out if it can't find default.
+             // But we can try to find "Cash" account if we had it.
+          }
+      } else if (data.payment_type === "Pay") {
+          // Us paying Supplier
+          if (data.party_account) newPayment.paid_to = data.party_account;
       }
       
-      // Update the document with new data
-      const updateData = await request.json();
-      const updatedDoc = {
-        ...currentDoc.message,
-        ...updateData,
-        doctype: "Payment Entry",
-        name: name, // Ensure name is preserved
-        // Map payment_method to mode_of_payment if present
-        ...(updateData.payment_method && { mode_of_payment: updateData.payment_method }),
-        // Set the appropriate amount field based on payment type if amount is updated
-        ...(updateData.amount && {
-          ...(updateData.payment_type === "Receive" 
-            ? { received_amount: updateData.amount } 
-            : { paid_amount: updateData.amount }
-          )
-        })
-      };
-      
-      // Remove payment_method if we've mapped it to mode_of_payment
-      delete updatedDoc.payment_method;
-      
-      // Use frappe.client.save to update the document
-      const result = await frappeClient.call.post("frappe.client.save", {
-        doc: updatedDoc
-      });
-      
-      if (!result.message || !result.message.name) {
-        throw new Error("Failed to update payment entry");
-      }
-      
-      return { payment: result.message as PaymentEntry };
-    })
-  );
-}
+      // Explicit overrides
 
-// DELETE - Delete payment entry
-export async function DELETE(request: NextRequest) {
-  return handleApiRequest<{ message: string }>(
-    withEndpointLogging("/api/accounting/payments - DELETE")(async () => {
-      const { searchParams } = new URL(request.url);
-      const name = searchParams.get("name");
+      
+      // Explicit overrides
+      if (data.paid_to) Object.assign(newPayment, { paid_to: data.paid_to });
+      if (data.paid_from) Object.assign(newPayment, { paid_from: data.paid_from });
 
-      if (!name) throw new Error("Payment name parameter is required");
+      const result = await frappeClient.call.post("frappe.client.insert", { doc: newPayment });
+      
+      // Auto-submit if requested? Normally Payment Entries are drafted first. 
+      // We'll leave it as Draft (docstatus 0).
 
-      await frappeClient.db.deleteDoc("Payment Entry", name);
-      return { message: `Payment ${name} deleted successfully` };
-    })
+      return { payment: result.message };
+    }),
+    { requireAuth: true }
   );
 }
